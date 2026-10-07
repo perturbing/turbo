@@ -8,12 +8,16 @@ import { PowerProfileChart } from '../../components/PowerProfileChart';
 import { formatDuration } from '../../engine/planResolve';
 import { downloadFile } from '../../data/exportImport';
 import { Pill } from '../../components/StatusPill';
+import { useWakeLock } from '../../hooks/useWakeLock';
 
 export function LiveRideScreen() {
   const navigate = useNavigate();
   const { prepared, engine, snapshot, startRide, lastFinished } = useRideStore();
   const reducedMotion = useSettingsStore((s) => s.settings.reducedMotion);
   const [confirmEnd, setConfirmEnd] = useState(false);
+
+  // Keep the phone screen on for as long as a ride engine is running.
+  useWakeLock(!!engine);
 
   // Navigation is driven by store state, not engine callbacks: when the engine
   // finishes it resets the store, which re-renders this screen before any
