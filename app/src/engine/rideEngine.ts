@@ -39,6 +39,10 @@ export interface EngineOptions {
 const FRESHNESS_MS = 3000;
 const SAMPLES_PER_CHUNK = 60;
 const AUTOSAVE_MS = 10_000;
+// Upper bound on one trainer command as seen from the engine. The BLE layer has
+// its own (shorter) deadline; this one guarantees the ride loop can never be
+// pinned by a control write that fails to settle, whatever the device layer does.
+const COMMAND_DEADLINE_MS = 10_000;
 
 interface Fresh {
   value: number;
@@ -67,6 +71,18 @@ export class RideEngine {
   private events: RideEvent[] = [];
   private lastSentTargetW: number | null = null;
   private targetConfirmed = false;
+  // One control command in flight at a time from the engine's side. Ticks that
+  // arrive meanwhile skip the write; the next tick re-evaluates the (latest)
+  // target, so a changed target is never lost and never queued up N times.
+  private commandInFlight = false;
+  // A forced re-apply (resume, cooldown) requested while a command was in
+  // flight is carried over to the next tick instead of being dropped.
+  private forceNextApply = false;
+  private finishedRecording: RideRecording | null = null;
+  // All IndexedDB writes go through one chain: an autosave and a finish that
+  // overlap would otherwise interleave chunk writes (losing samples) or let
+  // the autosave's in-progress header land after the final record.
+  private saveChain: Promise<void> = Promise.resolve();
   private gear = DEFAULT_GEAR;
   private rampCooldownFromS: number | null = null;
 
@@ -169,8 +185,12 @@ export class RideEngine {
 
     this.phase = 'riding';
     await this.persistHeader();
-    await this.applyModeTarget(true);
+    // The loop starts before the first target is confirmed: a slow or hung
+    // first write delays the target, never the ride (ticks skip while a
+    // command is in flight and retry if it fails).
     this.timer = setInterval(() => void this.tick(), 1000);
+    this.emit();
+    await this.applyModeTarget(true);
     this.emit();
   }
 
@@ -202,6 +222,7 @@ export class RideEngine {
   }
 
   private async tick(): Promise<void> {
+    if (this.phase === 'finished') return;
     const now = Date.now();
     const dt = (now - this.lastTickMs) / 1000;
     this.lastTickMs = now;
@@ -221,12 +242,15 @@ export class RideEngine {
     });
 
     if (this.phase === 'riding') {
-      await this.applyModeTarget(false);
-      // Workout completes when the plan runs out.
+      // Workout completes when the plan runs out. Checked before the target
+      // write so completion never waits on the trainer.
       if (this.opts.plan && this.planElapsedS >= this.opts.plan.totalS) {
         await this.finish('completed');
         return;
       }
+      await this.applyModeTarget(false);
+      // The ride may have been ended while the command was in flight.
+      if ((this.phase as RidePhase) === 'finished') return;
     }
 
     if (now - this.lastAutosaveMs >= AUTOSAVE_MS) {
@@ -242,6 +266,13 @@ export class RideEngine {
   private async applyModeTarget(force: boolean): Promise<void> {
     const trainer = this.opts.trainer;
     if (!trainer || trainer.connection !== 'connected') return;
+    if (this.commandInFlight) {
+      // The next tick re-evaluates with the latest target.
+      if (force) this.forceNextApply = true;
+      return;
+    }
+    force = force || this.forceNextApply;
+    this.forceNextApply = false;
 
     if (this.opts.mode === 'erg') {
       const target = this.currentTargetW();
@@ -254,15 +285,9 @@ export class RideEngine {
   }
 
   private async sendTargetPower(trainer: Trainer, watts: number): Promise<void> {
+    this.commandInFlight = true;
     try {
-      if (!trainer.hasControl && !(await trainer.requestControl())) {
-        this.noteTargetFailure(watts, 'control not granted');
-        return;
-      }
-      let result = await trainer.setTargetPower(watts);
-      if (result === 'control_not_permitted' && (await trainer.requestControl())) {
-        result = await trainer.setTargetPower(watts);
-      }
+      const result = await withDeadline(this.writeTargetPower(trainer, watts), COMMAND_DEADLINE_MS);
       if (result === 'success') {
         this.lastSentTargetW = watts;
         this.targetConfirmed = true;
@@ -272,16 +297,24 @@ export class RideEngine {
       }
     } catch (e) {
       this.noteTargetFailure(watts, e instanceof Error ? e.message : 'write failed');
+    } finally {
+      this.commandInFlight = false;
     }
   }
 
+  private async writeTargetPower(trainer: Trainer, watts: number): Promise<string> {
+    if (!trainer.hasControl && !(await trainer.requestControl())) return 'control not granted';
+    let result = await trainer.setTargetPower(watts);
+    if (result === 'control_not_permitted' && (await trainer.requestControl())) {
+      result = await trainer.setTargetPower(watts);
+    }
+    return result;
+  }
+
   private async sendGrade(trainer: Trainer, gradePct: number): Promise<void> {
+    this.commandInFlight = true;
     try {
-      if (!trainer.hasControl && !(await trainer.requestControl())) {
-        this.noteTargetFailure(gradePct, 'control not granted');
-        return;
-      }
-      const result = await trainer.setSimulationGrade(gradePct);
+      const result = await withDeadline(this.writeGrade(trainer, gradePct), COMMAND_DEADLINE_MS);
       if (result === 'success') {
         this.targetConfirmed = true;
         this.addEvent('targetSet', { gradePct });
@@ -290,7 +323,14 @@ export class RideEngine {
       }
     } catch (e) {
       this.noteTargetFailure(gradePct, e instanceof Error ? e.message : 'write failed');
+    } finally {
+      this.commandInFlight = false;
     }
+  }
+
+  private async writeGrade(trainer: Trainer, gradePct: number): Promise<string> {
+    if (!trainer.hasControl && !(await trainer.requestControl())) return 'control not granted';
+    return trainer.setSimulationGrade(gradePct);
   }
 
   private noteTargetFailure(value: number, reason: string): void {
@@ -352,7 +392,10 @@ export class RideEngine {
     return this.rampCooldownFromS;
   }
 
+  // Idempotent: a second call (double tap, or the plan running out while the
+  // rider is ending early) returns the same recording.
   async finish(state: 'completed' | 'ended-early'): Promise<RideRecording> {
+    if (this.finishedRecording) return this.finishedRecording;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     for (const u of this.unsubs) u();
@@ -360,23 +403,26 @@ export class RideEngine {
     this.phase = 'finished';
     this.addEvent('finish', { state });
 
-    const trainer = this.opts.trainer;
-    if (trainer && trainer.connection === 'connected' && trainer.hasControl) {
-      try {
-        await trainer.release();
-      } catch {
-        // Releasing control is best-effort; the recording is already safe.
-      }
-    }
-
+    // Persist first: the recording must never depend on the trainer answering.
     const recording = this.buildRecording(state);
+    this.finishedRecording = recording;
     try {
-      await this.flushSamples();
-      await saveRecording(recording);
+      await this.serializedSave(async () => {
+        await this.flushSamples();
+        await saveRecording(recording);
+      });
       this.saveError = null;
     } catch (e) {
       this.saveError = e instanceof Error ? e.message : 'save failed';
     }
+
+    // Hand the trainer back (FTMS reset ends ERG). Best-effort and not awaited:
+    // a wedged link must not keep the rider on the live screen.
+    const trainer = this.opts.trainer;
+    if (trainer && trainer.connection === 'connected' && trainer.hasControl) {
+      trainer.release().catch(() => undefined);
+    }
+
     this.emit();
     for (const cb of this.finishedListeners) cb(recording);
     return recording;
@@ -413,9 +459,15 @@ export class RideEngine {
     };
   }
 
+  private serializedSave(fn: () => Promise<void>): Promise<void> {
+    const next = this.saveChain.then(fn, fn);
+    this.saveChain = next.catch(() => undefined);
+    return next;
+  }
+
   private async persistHeader(): Promise<void> {
     try {
-      await saveRecording(this.buildRecording('in-progress'));
+      await this.serializedSave(() => saveRecording(this.buildRecording('in-progress')));
       this.saveError = null;
     } catch (e) {
       this.saveError = e instanceof Error ? e.message : 'save failed';
@@ -438,12 +490,31 @@ export class RideEngine {
 
   private async autosave(): Promise<void> {
     try {
-      await this.flushSamples();
-      await saveRecording(this.buildRecording(this.phase === 'finished' ? 'completed' : 'in-progress'));
+      await this.serializedSave(async () => {
+        if (this.phase === 'finished') return; // finish() writes the final record
+        await this.flushSamples();
+        await saveRecording(this.buildRecording('in-progress'));
+      });
       this.saveError = null;
     } catch (e) {
       // Surfaced in the UI as a banner with an immediate export escape hatch.
       this.saveError = e instanceof Error ? e.message : 'save failed';
     }
   }
+}
+
+function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no response from trainer within ${ms / 1000} s`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }

@@ -53,7 +53,8 @@ while the button-check drawer is open.
 ## Architecture
 
 - `src/ble/` — Web Bluetooth device layer: `decoders/` (pure, unit-tested against hex fixtures
-  from the real device logs), `trainer.ts` (FTMS control with ack-gated commands), `ridePods.ts`
+  from the real device logs), `trainer.ts` (FTMS control with ack-gated commands under a deadline — a write that never settles is
+  reported as failed and retried, two in a row reset the GATT link and reconnect), `ridePods.ts`
   (dual-pod merge + `RideOn` handshake), `deviceManager.ts` (lifecycle/reconnect), `mock/`.
 - `src/engine/` — UI-independent ride engine (state machine, 1 Hz sampling, ERG scheduling,
   autosave), plan resolution, ramp-test method (`ramp-v1`), virtual gears.

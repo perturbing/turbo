@@ -13,7 +13,19 @@ import {
 } from './decoders/ftmsControl';
 import type { ConnectionState, Trainer, TrainerCapabilities, TelemetryUpdate, Unsubscribe } from './types';
 
-const ACK_TIMEOUT_MS = 5000;
+// A control-point command is the write (with response) followed by the
+// `80 <opcode> <result>` indication. Either half can silently never settle on
+// some platforms (observed on Android: the write promise never resolved even
+// though the trainer applied the target), so the WHOLE command runs against one
+// deadline. A command that times out is reported as failed and the queue moves
+// on — the engine retries on its next tick.
+const COMMAND_TIMEOUT_MS = 6000;
+// After this many consecutive failed commands the GATT link is assumed wedged
+// and is dropped on purpose so the normal reconnect path re-establishes it.
+const MAX_CONSECUTIVE_FAILURES = 2;
+const RECONNECT_FIRST_DELAY_MS = 1000;
+const RECONNECT_RETRY_DELAY_MS = 5000;
+const SETUP_TIMEOUT_MS = 15_000;
 
 export class BleTrainer implements Trainer {
   readonly kind = 'trainer' as const;
@@ -24,10 +36,12 @@ export class BleTrainer implements Trainer {
   private server: BluetoothRemoteGATTServer | null = null;
   private controlPoint: BluetoothRemoteGATTCharacteristic | null = null;
   private crank = new CrankTracker();
-  private pendingAck: { opcode: number; resolve: (ack: FtmsAck) => void } | null = null;
+  private pendingAck: { opcode: number; resolve: (ack: FtmsAck | null) => void } | null = null;
   // Serialize control-point commands: one in flight at a time.
   private commandQueue: Promise<unknown> = Promise.resolve();
   private intentionalDisconnect = false;
+  private consecutiveFailures = 0;
+  private recovering = false;
 
   private telemetryCbs = new Set<(u: TelemetryUpdate) => void>();
   private connectionCbs = new Set<(s: ConnectionState) => void>();
@@ -171,29 +185,81 @@ export class BleTrainer implements Trainer {
   }
 
   // Write with response, then await the matching `80 <opcode> <result>`
-  // indication (5 s timeout). Commands are strictly serialized.
+  // indication, the whole exchange under one deadline. Commands are strictly
+  // serialized; a timed-out command never blocks the next one.
   private sendCommand(payload: Uint8Array): Promise<FtmsResult> {
-    const run = async (): Promise<FtmsResult> => {
-      if (!this.controlPoint || this.connection !== 'connected') return 'operation_failed';
-      const opcode = payload[0];
-      const ackPromise = new Promise<FtmsAck | null>((resolve) => {
-        this.pendingAck = { opcode, resolve };
-        setTimeout(() => {
-          if (this.pendingAck?.opcode === opcode) {
-            this.pendingAck = null;
-            resolve(null);
-          }
-        }, ACK_TIMEOUT_MS);
-      });
-      await this.controlPoint.writeValueWithResponse(payload.buffer as ArrayBuffer);
-      const ack = await ackPromise;
-      if (!ack) return 'operation_failed';
-      if (ack.result === 'control_not_permitted') this.setControl(false);
-      return ack.result;
-    };
+    const run = () => this.execute(payload);
     const next = this.commandQueue.then(run, run);
     this.commandQueue = next.catch(() => undefined);
     return next;
+  }
+
+  private async execute(payload: Uint8Array): Promise<FtmsResult> {
+    const controlPoint = this.controlPoint;
+    if (!controlPoint || this.connection !== 'connected') return 'operation_failed';
+    const opcode = payload[0];
+    const pending: { opcode: number; resolve: (ack: FtmsAck | null) => void } = { opcode, resolve: () => {} };
+    const ackPromise = new Promise<FtmsAck | null>((resolve) => {
+      pending.resolve = resolve;
+    });
+    this.pendingAck = pending;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const deadline = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), COMMAND_TIMEOUT_MS);
+    });
+    const exchange = async (): Promise<FtmsAck | null> => {
+      await controlPoint.writeValueWithResponse(payload.buffer as ArrayBuffer);
+      return ackPromise;
+    };
+
+    let outcome: FtmsResult = 'operation_failed';
+    let acked = false;
+    try {
+      const raced = await Promise.race([exchange(), deadline]);
+      // 'timeout': write or ack never came back; null: link dropped mid-command.
+      if (raced !== 'timeout' && raced !== null) {
+        acked = true;
+        outcome = raced.result;
+      }
+    } catch {
+      // writeValueWithResponse rejected (e.g. "GATT operation already in
+      // progress" after a previous write wedged, or a NetworkError).
+    } finally {
+      if (timer) clearTimeout(timer);
+      // A late ack for this command must not be matched to a later one.
+      if (this.pendingAck === pending) this.pendingAck = null;
+    }
+
+    if (outcome === 'control_not_permitted') this.setControl(false);
+    // Any ack — even a non-success result — proves the link is alive; only
+    // commands that never came back count towards a link reset.
+    if (acked) this.consecutiveFailures = 0;
+    else this.noteCommandFailure();
+    return outcome;
+  }
+
+  private noteCommandFailure(): void {
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) this.recoverLink();
+  }
+
+  // Drop a wedged GATT link on purpose. `gattserverdisconnected` then fires and
+  // the normal reconnect loop re-establishes the session; the engine sees the
+  // usual interrupted -> reconnected flow and re-applies its target on resume.
+  private recoverLink(): void {
+    if (this.recovering || this.connection !== 'connected') return;
+    this.recovering = true;
+    this.consecutiveFailures = 0;
+    this.intentionalDisconnect = false;
+    try {
+      this.device.gatt?.disconnect();
+    } catch {
+      /* the disconnect event (or its absence) decides what happens next */
+    }
+    // Some stacks do not fire the disconnect event for a locally initiated
+    // disconnect; treat the link as gone regardless so a reconnect runs.
+    if (this.connection === 'connected') this.onDisconnected();
   }
 
   async requestControl(): Promise<boolean> {
@@ -257,14 +323,25 @@ export class BleTrainer implements Trainer {
     this.intentionalDisconnect = true;
     this.device.gatt?.disconnect();
     this.setControl(false);
+    this.controlPoint = null;
+    const pending = this.pendingAck;
+    this.pendingAck = null;
+    pending?.resolve(null);
     this.setConnection('disconnected');
   }
 
   private onDisconnected(): void {
+    if (this.connection === 'disconnected' || this.connection === 'reconnecting') return;
     this.setControl(false);
     this.crank.reset();
+    this.controlPoint = null;
+    this.consecutiveFailures = 0;
+    // Settle whatever command is waiting for an ack so the queue moves on.
+    const pending = this.pendingAck;
     this.pendingAck = null;
+    pending?.resolve(null);
     if (this.intentionalDisconnect) {
+      this.recovering = false;
       this.setConnection('disconnected');
       return;
     }
@@ -272,23 +349,56 @@ export class BleTrainer implements Trainer {
     void this.reconnectLoop();
   }
 
-  // 5 s backoff, mirrors the PoC's keep() wrapper. Gives up after a while when
-  // nothing is listening; the Devices screen offers a manual reconnect.
+  // First retry after 1 s (a deliberate link reset should heal fast), then a
+  // 5 s backoff like the PoC's keep() wrapper. Each attempt is bounded so a
+  // hung GATT connect/setup cannot stall the loop. Gives up after ~2 min; the
+  // Devices screen offers a manual reconnect.
   private async reconnectLoop(): Promise<void> {
     for (let attempt = 0; attempt < 24 && this.connection === 'reconnecting'; attempt++) {
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, attempt === 0 ? RECONNECT_FIRST_DELAY_MS : RECONNECT_RETRY_DELAY_MS));
       if (this.connection !== 'reconnecting') return;
       try {
-        this.server = await this.device.gatt!.connect();
-        await this.setup();
+        await withTimeout(
+          (async () => {
+            this.server = await this.device.gatt!.connect();
+            await this.setup();
+          })(),
+          SETUP_TIMEOUT_MS,
+          () => this.device.gatt?.disconnect(),
+        );
+        this.recovering = false;
         this.setConnection('connected');
         return;
       } catch {
         // keep trying
       }
     }
+    this.recovering = false;
     if (this.connection === 'reconnecting') this.setConnection('disconnected');
   }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try {
+        onTimeout();
+      } catch {
+        /* best-effort */
+      }
+      reject(new Error('timeout'));
+    }, ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
 export async function requestTrainerDevice(): Promise<BluetoothDevice> {

@@ -161,4 +161,98 @@ describe('RideEngine end-to-end with mock trainer', () => {
     expect(rec.resolvedPlan).toBeNull();
     expect(rec.events.some((e) => e.type === 'stageAdvanced' && e.detail?.cooldown)).toBe(true);
   });
+
+  it('a trainer command that never settles cannot stall the ride loop (2026-10-13 phone rides)', async () => {
+    const trainer = new MockTrainer();
+    const connectP = trainer.connect();
+    await vi.advanceTimersByTimeAsync(700);
+    await connectP;
+    // Reproduce the field failure: one setTargetPower promise never resolves,
+    // then the trainer behaves normally again.
+    const realSet = trainer.setTargetPower.bind(trainer);
+    let hangNext = false;
+    let calls = 0;
+    trainer.setTargetPower = (w: number) => {
+      calls++;
+      if (hangNext) {
+        hangNext = false;
+        return new Promise(() => {});
+      }
+      return realSet(w);
+    };
+
+    const engine = new RideEngine({
+      kind: 'workout',
+      recordingId: 'hang-ride',
+      name: 'Hang ride',
+      mode: 'erg',
+      ftpUsed: 200,
+      plan: {
+        totalS: 60,
+        steps: [
+          { startS: 0, endS: 5, kind: 'steady', targetW: 100 },
+          { startS: 5, endS: 60, kind: 'recovery', targetW: 60 },
+        ],
+      },
+      trainer,
+      hrm: null,
+    });
+    await engine.start();
+    await vi.advanceTimersByTimeAsync(2500);
+    hangNext = true; // the 60 W step entry at t=5 s will hang
+    await vi.advanceTimersByTimeAsync(5000); // t = 7.5 s: write pending, deadline not reached
+    expect(calls).toBe(2);
+    expect(engine.snapshot().targetW).toBe(60);
+    expect(engine.snapshot().targetConfirmed).toBe(true); // still the last confirmed one
+    expect(engine.getEvents().filter((e) => e.type === 'targetSet').map((e) => e.detail?.targetW)).toEqual([100]);
+
+    // Ticks kept going: samples recorded and autosaved while the command hung.
+    await vi.advanceTimersByTimeAsync(5000); // t = 12.5 s
+    expect(engine.getSamples().length).toBeGreaterThanOrEqual(11);
+    expect((await loadSamples('hang-ride')).length).toBeGreaterThan(0);
+
+    // Deadline (10 s) passed: failure recorded, retried on the next tick, acked.
+    await vi.advanceTimersByTimeAsync(4000); // t = 16.5 s
+    const events = engine.getEvents();
+    expect(events.some((e) => e.type === 'targetFailed' && e.detail?.value === 60)).toBe(true);
+    expect(events.filter((e) => e.type === 'targetSet').map((e) => e.detail?.targetW)).toEqual([100, 60]);
+    expect(engine.snapshot().targetConfirmed).toBe(true);
+    expect(calls).toBe(3); // exactly one retry: ticks during the hang did not pile up
+
+    // Ending the ride while the trainer hangs on release still completes at once.
+    trainer.release = () => new Promise(() => {});
+    const rec = await engine.finish('ended-early');
+    expect(rec.state).toBe('ended-early');
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect((await getRecording('hang-ride'))!.state).toBe('ended-early'); // no late autosave overwrote it
+  });
+
+  it('ending early is not overwritten by an autosave that was already running', async () => {
+    const trainer = new MockTrainer();
+    const connectP = trainer.connect();
+    await vi.advanceTimersByTimeAsync(700);
+    await connectP;
+    const engine = new RideEngine({
+      kind: 'workout',
+      recordingId: 'race-ride',
+      name: 'Race ride',
+      mode: 'erg',
+      ftpUsed: 200,
+      plan,
+      trainer,
+      hrm: null,
+    });
+    await engine.start();
+    // The autosave at t=10 s starts (async IndexedDB work) right before finish.
+    await vi.advanceTimersByTimeAsync(10_000);
+    const rec = await engine.finish('ended-early');
+    expect(rec.state).toBe('ended-early');
+    await vi.advanceTimersByTimeAsync(1000);
+    const saved = await getRecording('race-ride');
+    expect(saved!.state).toBe('ended-early');
+    expect(saved!.events.map((e) => e.type)).toContain('finish');
+    // No samples lost or duplicated by interleaved chunk writes.
+    const samples = await loadSamples('race-ride');
+    expect(samples.map((s) => s.elapsedS)).toEqual(engine.getSamples().map((s) => s.elapsedS));
+  });
 });
