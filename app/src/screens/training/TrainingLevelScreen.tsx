@@ -6,6 +6,7 @@ import { useRideStore } from '../../state/rideStore';
 import { useReadiness, ReadinessChecklist } from '../../components/ReadinessChecklist';
 import { saveFtpObservation } from '../../data/repositories/ftpHistory';
 import { RAMP_METHOD, RAMP_V1 } from '../../engine/rampTest';
+import { PhysiologyPanel } from './PhysiologyPanel';
 
 export function TrainingLevelScreen() {
   const navigate = useNavigate();
@@ -119,6 +120,8 @@ export function TrainingLevelScreen() {
           </button>
         </div>
       </div>
+
+      <PhysiologyPanel />
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>FTP history</h2>

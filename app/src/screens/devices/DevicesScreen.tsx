@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useDeviceStore, metricDisplay } from '../../state/deviceStore';
+import { useSettingsStore } from '../../state/settingsStore';
 import { canReattach, getTrainer } from '../../ble/deviceManager';
 import {
   connectHrm,
@@ -197,7 +198,11 @@ function RiderWeightRow() {
     void getTrainer()
       ?.readWeightKg()
       .then((kg) => {
-        if (!cancelled) setWeight(kg);
+        if (cancelled) return;
+        setWeight(kg);
+        // The trainer's weight is the rider's weight: keep settings in step so
+        // relative VO2max uses it without a second entry.
+        if (kg) void useSettingsStore.getState().update({ weightKg: Math.round(kg * 10) / 10 });
       });
     return () => {
       cancelled = true;
@@ -213,6 +218,7 @@ function RiderWeightRow() {
       setStatus('The trainer did not accept the weight.');
     } else {
       setWeight(confirmed);
+      void useSettingsStore.getState().update({ weightKg: Math.round(confirmed * 10) / 10 });
       setStatus(`Trainer confirmed ${confirmed.toFixed(1)} kg`);
       setEditing(false);
     }

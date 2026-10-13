@@ -65,6 +65,9 @@ export const useRideStore = create<RideState>((set, get) => ({
         if (state.hr && state.hr !== prevState.hr) {
           engine.pushTelemetry({ source: 'hrm', ts: state.hr.atMs, hrBpm: state.hr.value });
         }
+        if (state.rr && state.rr !== prevState.rr) {
+          engine.pushTelemetry({ source: 'hrm', ts: state.rr.atMs, rrIntervalsS: state.rr.intervalsS });
+        }
       }),
     );
     engineUnsubs.push(engine.onSnapshot((snapshot) => set({ snapshot })));

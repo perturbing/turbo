@@ -196,8 +196,8 @@ export function assessForm(
   if (rampTestPlannedWithinDays !== null) {
     reasons.push(
       testReady
-        ? `A ramp test is planned within ${rampTestPlannedWithinDays} day${rampTestPlannedWithinDays === 1 ? '' : 's'} and your form is in the test window (+${lo} to +${hi}).`
-        : `A ramp test is planned within ${rampTestPlannedWithinDays} day${rampTestPlannedWithinDays === 1 ? '' : 's'} but your form is outside the test window (+${lo} to +${hi}); ease off beforehand or the result will understate you.`,
+        ? `A maximal test is planned within ${rampTestPlannedWithinDays} day${rampTestPlannedWithinDays === 1 ? '' : 's'} and your form is in the test window (+${lo} to +${hi}).`
+        : `A maximal test is planned within ${rampTestPlannedWithinDays} day${rampTestPlannedWithinDays === 1 ? '' : 's'} but your form is outside the test window (+${lo} to +${hi}); ease off beforehand or the result will understate you.`,
     );
   }
 

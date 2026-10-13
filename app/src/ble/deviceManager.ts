@@ -101,7 +101,10 @@ function wireHrm(h: HeartRateMonitor): void {
     useDeviceStore.getState().set({ hrmConnection: state, hrmBatteryPct: h.batteryPct }),
   );
   h.onTelemetry((u) => {
-    if (u.hrBpm !== undefined) useDeviceStore.getState().set({ hr: { value: u.hrBpm, atMs: u.ts } });
+    const patch: Parameters<ReturnType<typeof useDeviceStore.getState>['set']>[0] = {};
+    if (u.hrBpm !== undefined) patch.hr = { value: u.hrBpm, atMs: u.ts };
+    if (u.rrIntervalsS?.length) patch.rr = { intervalsS: u.rrIntervalsS, atMs: u.ts };
+    useDeviceStore.getState().set(patch);
   });
 }
 

@@ -208,7 +208,7 @@ describe('export -> import round-trip into a clean installation', () => {
   it('exports CSV with explicit empty cells for gaps', () => {
     const csv = recordingToCsv(samples.slice(0, 6));
     const lines = csv.split('\n');
-    expect(lines[0]).toBe('elapsed_s,timestamp,power_w,cadence_rpm,speed_kmh,hr_bpm');
+    expect(lines[0]).toBe('elapsed_s,timestamp,power_w,cadence_rpm,speed_kmh,hr_bpm,rr_ms');
     expect(lines[1]).toContain(',,90,32.5,'); // null power -> empty cell
     expect(lines[6].split(',')[2]).toBe('108');
   });

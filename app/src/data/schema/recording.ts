@@ -30,6 +30,10 @@ export const RideSample = z.object({
   cadenceRpm: z.number().nullable(),
   speedKmh: z.number().nullable(),
   hrBpm: z.number().nullable(),
+  // Beat-to-beat intervals (ms) received during this second, in order. Absent
+  // when the strap sends none. Optional: samples recorded before this field
+  // existed stay valid.
+  rrMs: z.array(z.number().int().positive()).optional(),
 });
 export type RideSample = z.infer<typeof RideSample>;
 

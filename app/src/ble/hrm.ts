@@ -54,7 +54,8 @@ export class BleHeartRateMonitor implements HeartRateMonitor {
       const value = (ev.target as BluetoothRemoteGATTCharacteristic).value;
       if (!value) return;
       const s = parseHeartRate(value);
-      for (const cb of this.telemetryCbs) cb({ source: 'hrm', ts: Date.now(), hrBpm: s.hrBpm });
+      for (const cb of this.telemetryCbs)
+        cb({ source: 'hrm', ts: Date.now(), hrBpm: s.hrBpm, ...(s.rrIntervalsS?.length ? { rrIntervalsS: s.rrIntervalsS } : {}) });
     });
     await hrm.startNotifications();
     try {

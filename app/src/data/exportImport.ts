@@ -300,9 +300,9 @@ export async function commitImport(preview: ImportPreview): Promise<{ added: num
 }
 
 export function recordingToCsv(samples: RideSample[]): string {
-  const header = 'elapsed_s,timestamp,power_w,cadence_rpm,speed_kmh,hr_bpm';
+  const header = 'elapsed_s,timestamp,power_w,cadence_rpm,speed_kmh,hr_bpm,rr_ms';
   const rows = samples.map((s) =>
-    [s.elapsedS, s.ts, s.powerW ?? '', s.cadenceRpm ?? '', s.speedKmh ?? '', s.hrBpm ?? ''].join(','),
+    [s.elapsedS, s.ts, s.powerW ?? '', s.cadenceRpm ?? '', s.speedKmh ?? '', s.hrBpm ?? '', s.rrMs?.join('|') ?? ''].join(','),
   );
   return [header, ...rows].join('\n');
 }

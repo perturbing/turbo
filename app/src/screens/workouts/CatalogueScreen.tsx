@@ -10,7 +10,7 @@ import type { WorkoutRecipe } from '../../data/schema';
 import { previewImport, type ImportPreview, commitImport, ImportFormatError } from '../../data/exportImport';
 import { ImportDialog } from '../data/ImportDialog';
 
-const CATEGORIES = ['all', 'endurance', 'intervals', 'tempo', 'recovery', 'custom'] as const;
+const CATEGORIES = ['all', 'endurance', 'intervals', 'tempo', 'recovery', 'test', 'custom'] as const;
 
 export function CatalogueScreen() {
   const { recipes, loaded, refresh } = useLibraryStore();

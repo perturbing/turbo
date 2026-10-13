@@ -6,7 +6,26 @@ const T = '2026-01-01T00:00:00.000Z';
 // Fixed UUIDs so re-seeding and import dedupe are self-healing.
 const base = { schemaVersion: 1 as const, revision: 1, createdAt: T, updatedAt: T, source: 'builtin' as const };
 
+// Reserved: the 3-minute all-out critical-power test. Ridden in Shift mode
+// (ERG cannot hold an all-out effort); the analysis finds the all-out step by
+// this id and derives CP and W' from it (engine/physiology.ts).
+export const CP_TEST_RECIPE_ID = 'builtin-cp-test-3min';
+
 export const BUILTIN_WORKOUTS: WorkoutRecipe[] = [
+  {
+    ...base,
+    id: CP_TEST_RECIPE_ID,
+    name: '3-minute all-out test (Shift mode)',
+    category: 'test',
+    defaultMode: 'shift',
+    blocks: [
+      { kind: 'ramp', label: 'Warm-up', durationS: 600, startTarget: { basis: 'ftpPct', pct: 45 }, endTarget: { basis: 'ftpPct', pct: 65 } },
+      { kind: 'steady', label: 'Opener', durationS: 20, target: { basis: 'ftpPct', pct: 120 }, cadence: { minRpm: 95, maxRpm: 110 } },
+      { kind: 'recovery', label: 'Settle', durationS: 220, target: { basis: 'ftpPct', pct: 50 } },
+      { kind: 'steady', label: 'ALL OUT — no pacing', durationS: 180, target: { basis: 'ftpPct', pct: 150 }, cadence: { minRpm: 90, maxRpm: 110 } },
+      { kind: 'recovery', label: 'Cooldown', durationS: 600, target: { basis: 'ftpPct', pct: 45 } },
+    ],
+  },
   {
     ...base,
     id: 'builtin-endurance-220',

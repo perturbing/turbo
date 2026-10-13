@@ -4,6 +4,7 @@ import { useLibraryStore } from '../../state/libraryStore';
 import { useSettingsStore } from '../../state/settingsStore';
 import { metricsForAll } from '../../data/repositories/rideMetrics';
 import { RAMP_TEST_RECIPE_ID, type RideRecording } from '../../data/schema';
+import { CP_TEST_RECIPE_ID } from '../../data/builtinWorkouts';
 import type { RideMetrics } from '../../engine/metrics';
 import { plannedTss } from '../../engine/metrics';
 import { resolvePlan } from '../../engine/planResolve';
@@ -12,6 +13,7 @@ import { assessForm, RULES, VERDICT_METHOD, type RideForVerdict, type VerdictRes
 import { PerformanceChart } from '../../components/PerformanceChart';
 import { Explain, ExplainedTile, Glossary } from '../../components/Explain';
 import { localDateString } from '../calendar/CalendarScreen';
+import { ProgressSection } from './ProgressSection';
 
 // A ramp test is open-ended; this is the load a typical one produces.
 const RAMP_TEST_TSS = 30;
@@ -32,8 +34,9 @@ function weekStart(date: string): string {
 }
 
 export function FormScreen() {
-  const { recipes, recordings, plans, loaded, refresh } = useLibraryStore();
+  const { recipes, recordings, plans, ftpHistory, loaded, refresh } = useLibraryStore();
   const ftp = useSettingsStore((s) => s.settings.currentFtpW);
+  const weightKg = useSettingsStore((s) => s.settings.weightKg ?? null);
   const [metrics, setMetrics] = useState<Map<string, RideMetrics> | null>(null);
   const today = localDateString(new Date());
 
@@ -71,8 +74,9 @@ export function FormScreen() {
       .filter((p): p is DailyLoad => p.tss !== null);
 
     const series = performanceSeries(actual, planned, today, addDays(today, PROJECTION_DAYS), addDays(today, -HISTORY_DAYS));
+    // Both tests are maximal efforts: readiness applies to either.
     const nextTest = plans
-      .filter((p) => p.recipeId === RAMP_TEST_RECIPE_ID && p.date >= today)
+      .filter((p) => (p.recipeId === RAMP_TEST_RECIPE_ID || p.recipeId === CP_TEST_RECIPE_ID) && p.date >= today)
       .map((p) => daysBetween(today, p.date))
       .sort((a, b) => a - b)[0];
     const verdict = assessForm(series, today, rides, nextTest !== undefined && nextTest <= 14 ? nextTest : null);
@@ -160,6 +164,8 @@ export function FormScreen() {
           ) : null}
         </p>
       </div>
+
+      <ProgressSection recordings={recordings} recipes={recipes} metrics={metrics!} ftpHistory={ftpHistory} weightKg={weightKg} />
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>

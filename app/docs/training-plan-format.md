@@ -29,7 +29,7 @@ The envelope gains one (optional) array, `records.plans`:
 |---|---|---|
 | `schemaVersion` | number | always `1` |
 | `id` | string | unique per plan entry (UUID or slug like `"plan-w1-tue-sst"`). Re-importing the same id is skipped as a duplicate — so the same file can be imported twice safely |
-| `recipeId` | string | the `id` of the workout to ride that day — either a recipe in the SAME file's `records.recipes`, or one already in the rider's library. Prefer shipping the recipes in the same file so the plan is self-contained. **Reserved value** `"ramp-test"`: schedules the FTP ramp test (an open-ended protocol, not a recipe — do NOT ship a recipe for it) |
+| `recipeId` | string | the `id` of the workout to ride that day — either a recipe in the SAME file's `records.recipes`, or one already in the rider's library. Prefer shipping the recipes in the same file so the plan is self-contained. **Reserved value** `"ramp-test"`: schedules the FTP ramp test (an open-ended protocol, not a recipe — do NOT ship a recipe for it). **Builtin value** `"builtin-cp-test-3min"`: schedules the 3-minute all-out critical-power test, a builtin Shift-mode workout every installation has — reference it, do not ship it |
 | `date` | string | local calendar date, `"YYYY-MM-DD"`. A plan belongs to a day, not a time |
 | `note` | string | optional free text shown on hover (e.g. "key session — don't skip") |
 | `createdAt` | string | ISO 8601 timestamp |
@@ -51,6 +51,9 @@ The envelope gains one (optional) array, `records.plans`:
 - Multi-week plans that scale from FTP benefit from a scheduled test: put a
   `"recipeId": "ramp-test"` entry at the start of the plan (and optionally at the start of a
   later block), on a fresh day. It is matched done by any completed ramp-test ride that day.
+- The 3-minute all-out test (`"recipeId": "builtin-cp-test-3min"`) is a maximal effort too: place it
+  at the end of a recovery week, at least three days away from a ramp test, and never in a taper.
+  One per training block is plenty; it calibrates critical power against the ramp-based FTP.
 - A common weekly shape: 2–3 quality sessions + 1–2 endurance rides; every 3rd or 4th week
   lighter (fewer/shorter sessions) for recovery.
 - Use `note` for intent ("key session", "skip if tired"), not for structure.

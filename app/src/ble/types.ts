@@ -9,6 +9,9 @@ export interface TelemetryUpdate {
   cadenceRpm?: number;
   speedKmh?: number;
   hrBpm?: number;
+  // Beat-to-beat intervals since the previous notification (chest straps
+  // only). Feeds the DFA alpha-1 threshold analysis; never shown live.
+  rrIntervalsS?: number[];
 }
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';

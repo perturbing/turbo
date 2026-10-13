@@ -63,8 +63,11 @@ while the button-check drawer is open.
   math: `metrics.ts` (NP / IF / TSS / efficiency factor / decoupling / compliance per ride, cached in
   the `rideMetrics` store and recomputed when `METRICS_VERSION` changes), `performance.ts`
   (fitness / fatigue / form with a projection from the calendar) and `verdict.ts` (the named
-  `form-v1` load / hold / rest rules). Every metric has a plain-language entry in `ui/glossary.ts`
-  that the UI shows inline.
+  `form-v1` load / hold / rest rules). Physiology estimates live in `physiology.ts` (VO2max from
+  the ramp's maximal aerobic power via Hawley & Noakes, ramp HR markers, critical power and W′ from
+  the 3-minute all-out test, each with a freshness rule) and `dfa.ts` (DFA alpha-1 thresholds from
+  the strap's RR intervals, which are recorded per sample as `rrMs`). Every metric has a
+  plain-language entry in `ui/glossary.ts` that the UI shows inline.
 - `src/data/` — zod schemas (every record carries `schemaVersion`), IndexedDB stores, migration
   chain, export/import envelope, built-in workouts, FIT stub (`exportFit.ts`).
 - `src/screens/` — Workouts / Builder / Setup / Live ride / Training level / Ramp test /

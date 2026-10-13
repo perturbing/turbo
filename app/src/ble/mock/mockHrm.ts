@@ -30,7 +30,13 @@ export class MockHeartRateMonitor implements HeartRateMonitor {
     this.emit();
     this.timer = setInterval(() => {
       this.hr = Math.max(60, Math.min(185, this.hr + (Math.random() - 0.48) * 4));
-      for (const cb of this.telemetryCbs) cb({ source: 'hrm', ts: Date.now(), hrBpm: Math.round(this.hr) });
+      // One second of beats: RR around 60/HR with variability that fades at
+      // high heart rates, like a real strap's RR stream.
+      const rr: number[] = [];
+      const mean = 60 / this.hr;
+      const jitter = Math.max(0.005, 0.06 - this.hr / 4000);
+      for (let t = 0; t < 1; t += mean) rr.push(Math.round((mean + (Math.random() - 0.5) * jitter) * 1024) / 1024);
+      for (const cb of this.telemetryCbs) cb({ source: 'hrm', ts: Date.now(), hrBpm: Math.round(this.hr), rrIntervalsS: rr });
     }, 1000);
   }
 

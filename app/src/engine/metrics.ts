@@ -1,12 +1,15 @@
 import type { ResolvedPlan, RideEvent, RideRecording, RideSample } from '../data/schema';
 import { interpolatedTargetW, targetAt } from './planResolve';
+import { rideThresholds, type RideThresholds } from './dfa';
+import { cpFromAllOut, type CpTestResult } from './physiology';
+import { CP_TEST_RECIPE_ID } from '../data/builtinWorkouts';
 
 // Per-ride training metrics, computed from the 1 Hz samples after a ride
 // (and recomputed for old rides whenever METRICS_VERSION changes). Everything
 // here is pure. Definitions follow Coggan (NP, IF, TSS) and Friel (EF,
 // decoupling); the in-app glossary (ui/glossary.ts) explains each one.
 
-export const METRICS_VERSION = 'metrics-v1';
+export const METRICS_VERSION = 'metrics-v2';
 
 export interface RideMetrics {
   version: typeof METRICS_VERSION;
@@ -29,6 +32,10 @@ export interface RideMetrics {
   compliancePct: number | null;
   // Highest IF the plan asked for: separates key sessions from easy rides.
   plannedPeakIntensity: number | null;
+  // DFA alpha-1 thresholds from this ride's RR intervals (chest strap only).
+  thresholds: RideThresholds | null;
+  // Critical power and W' when this ride was the 3-minute all-out test.
+  cpTest: CpTestResult | null;
 }
 
 const NP_WINDOW_S = 30;
@@ -151,8 +158,28 @@ export function computeRideMetrics(
   const efficiencyFactor = np !== null && avgHrBpm ? np / avgHrBpm : null;
 
   const plan = recording.resolvedPlan;
-  const timeline = plan ? ridingTimeline(samples, recording.events) : [];
+  const timeline = ridingTimeline(samples, recording.events);
   const isErgWorkout = recording.kind === 'workout' && recording.mode === 'erg' && !!plan;
+  const riding = (i: number) => timeline[i]?.riding ?? false;
+
+  let cpTest: CpTestResult | null = null;
+  if (recording.recipeId === CP_TEST_RECIPE_ID && plan) {
+    const allOut = plan.steps.find((s) => s.label?.startsWith('ALL OUT'));
+    if (allOut) {
+      const power: (number | null)[] = [];
+      let last = -1;
+      samples.forEach((s, i) => {
+        const t = timeline[i];
+        if (!t.riding || t.planS < allOut.startS || t.planS >= allOut.endS) return;
+        const sec = Math.floor(t.planS - allOut.startS);
+        if (sec === last) return;
+        while (power.length < sec) power.push(null);
+        power.push(s.powerW);
+        last = sec;
+      });
+      cpTest = cpFromAllOut(power);
+    }
+  }
 
   return {
     version: METRICS_VERSION,
@@ -169,6 +196,8 @@ export function computeRideMetrics(
     decouplingPct: plan ? decoupling(plan, samples, timeline) : null,
     compliancePct: isErgWorkout ? compliance(plan, samples, timeline) : null,
     plannedPeakIntensity: plannedPeakIntensity(plan, ftp),
+    thresholds: samples.some((s) => s.rrMs) ? rideThresholds(samples, riding) : null,
+    cpTest,
   };
 }
 

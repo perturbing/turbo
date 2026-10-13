@@ -14,7 +14,15 @@ export type MetricKey =
   | 'form'
   | 'rpe'
   | 'intensity'
-  | 'verdict';
+  | 'verdict'
+  | 'vo2max'
+  | 'hrmax'
+  | 'lthr'
+  | 'lt1'
+  | 'lt2'
+  | 'dfa'
+  | 'cp'
+  | 'wprime';
 
 export interface MetricExplanation {
   name: string;
@@ -121,5 +129,69 @@ export const GLOSSARY: Record<MetricKey, MetricExplanation> = {
     read: 'Load: add volume or intensity. Hold: keep the plan as it is and let the body catch up. Rest: take easy days until form recovers.',
     caveat: 'It is a compass, not a coach. It cannot see sleep, illness, work stress or how you feel this morning. If it says load and you feel wrecked, trust yourself.',
     source: 'Thresholds follow Coggan and Friel conventions.',
+  },
+  vo2max: {
+    name: 'VO2max (estimated)',
+    short: 'The most oxygen your body can use per minute: the ceiling of your aerobic engine.',
+    how: 'From your ramp test. The best 1-minute power of a ramp to exhaustion (maximal aerobic power) goes into the Hawley and Noakes regression: litres per minute = 0.01141 × watts + 0.435, then divided by your weight for ml/kg/min.',
+    read: 'Recreational riders sit around 40 to 50 ml/kg/min, trained amateurs 50 to 65, professionals above 70. Shown as a range because the regression is about 7% off for an individual.',
+    caveat: 'It is an estimate from power, not a gas-exchange measurement. It is also hard to move: months of training shift it a few points. Thresholds move more and matter more for racing.',
+    source: 'Hawley & Noakes, 1992.',
+  },
+  hrmax: {
+    name: 'Maximum heart rate (observed)',
+    short: 'The highest heart rate seen in your last ramp test.',
+    how: 'Simply the peak heart rate recorded while you rode the ramp to failure.',
+    read: 'Yours, not a formula. It only changes meaningfully with age. Use it to set heart-rate zones if you ride outdoors without power.',
+    caveat: 'A ramp stopped early, a hot room or a bad night can leave it a few beats under the true value. Higher values seen later replace it.',
+    source: 'Direct observation.',
+  },
+  lthr: {
+    name: 'Threshold heart rate (approximate)',
+    short: 'Your heart rate around the second threshold, from the ramp test.',
+    how: 'The mean heart rate in the minute after your power first reached the ramp-based FTP estimate. Heart rate trails power in a ramp by 30 to 60 seconds, which that minute roughly compensates.',
+    read: 'Outdoors this is the ceiling for efforts you can hold 40 to 60 minutes. The DFA-based threshold heart rate, when available, is the better number.',
+    caveat: 'Approximate by construction. A 20- or 30-minute time trial gives a firmer value.',
+    source: 'Friel’s LTHR concept, applied to the ramp.',
+  },
+  lt1: {
+    name: 'First threshold (LT1, aerobic threshold)',
+    short: 'The intensity below which effort is almost purely aerobic and sustainable for hours.',
+    how: 'Estimated from heart-rate variability: the DFA alpha-1 index of your beat-to-beat intervals crosses 0.75 at this intensity. The app pools the estimates of your rides from the last four weeks and needs at least three.',
+    read: 'Endurance and recovery rides belong below it. In a race, time below LT1 costs almost nothing; it is where you recover while still moving.',
+    caveat: 'Needs a chest strap with clean beat data and steady two-minute stretches of riding. Some riders’ alpha-1 does not behave; if the estimates scatter widely between rides, treat the number as unreliable.',
+    source: 'Rogers et al., 2021 (DFA alpha-1 and the aerobic threshold).',
+  },
+  lt2: {
+    name: 'Second threshold (LT2, anaerobic threshold)',
+    short: 'The intensity above which lactate and fatigue accumulate: the line between sustainable and borrowed.',
+    how: 'Estimated from heart-rate variability: DFA alpha-1 crosses 0.5 at this intensity. Pooled from the last four weeks, at least three rides. It should sit close to your FTP and critical power; the three are different estimates of the same boundary.',
+    read: 'Power scales linearly with effort; the metabolic cost does not. Below LT2 you are paying as you go, above it you are spending a finite reserve (W′). For racing, this is the number that decides which moves you can follow.',
+    caveat: 'Rides that never reach this intensity give no estimate, by design. Agreement between DFA, FTP and CP within about 5% is a good sign; a big disagreement means one of the tests was not maximal.',
+    source: 'Rogers et al., 2021.',
+  },
+  dfa: {
+    name: 'DFA alpha-1',
+    short: 'A heart-rate-variability index that falls as intensity rises.',
+    how: 'Detrended fluctuation analysis of the beat-to-beat intervals in a two-minute window: how correlated the heartbeat timing is at short scales. Near 1.0 at rest, around 0.75 at the first threshold, around 0.5 at the second.',
+    read: 'You never need to read the index itself; the thresholds are derived from where it crosses those values.',
+    caveat: 'Ectopic beats and strap dropouts corrupt it. Windows with more than 5% artifacts are discarded, and estimates are never extrapolated beyond the intensities you actually rode.',
+    source: 'Peng et al. (DFA); Rogers et al., 2021 (application to exercise thresholds).',
+  },
+  cp: {
+    name: 'Critical power (CP)',
+    short: 'The highest power you can hold in a steady state: the hinge of your power-duration curve.',
+    how: 'From the 3-minute all-out test: the mean power of the final 30 seconds, after the reserve above it has been exhausted. Must be ridden in Shift mode, all out from the first pedal stroke.',
+    read: 'Close to FTP and LT2 for most riders. Efforts below CP can last a long time; above it, your time is set by W′ divided by how far above CP you are.',
+    caveat: 'A paced start (not going all out immediately) inflates CP and hides W′. The app flags a test whose final 30 seconds are more than 85% of the first 30 seconds as paced.',
+    source: 'Vanhatalo, Doust & Burnley, 2007.',
+  },
+  wprime: {
+    name: 'W′ (anaerobic work capacity)',
+    short: 'The finite reserve you can spend above critical power, in kilojoules.',
+    how: 'From the 3-minute all-out test: all the work done above CP during the 180 seconds.',
+    read: 'Typical values run 10 to 25 kJ. With CP it predicts time to exhaustion: at 50 W over CP, a 15 kJ reserve lasts five minutes. Attacks, climbs and bridging all draw on it; riding below CP refills it.',
+    caveat: 'Only as good as the all-out effort it came from. It shrinks with fatigue and is not improved by endurance training.',
+    source: 'Monod & Scherrer; Vanhatalo et al., 2007.',
   },
 };

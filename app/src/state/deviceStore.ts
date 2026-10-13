@@ -34,6 +34,9 @@ interface DeviceState {
   cadence: LiveMetric | null;
   speed: LiveMetric | null;
   hr: LiveMetric | null;
+  // Latest RR batch from the strap; a new object per notification so a
+  // subscriber sees every batch (identity, not value, changes).
+  rr: { intervalsS: number[]; atMs: number } | null;
 
   set: (partial: Partial<DeviceState>) => void;
 }
@@ -56,6 +59,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   cadence: null,
   speed: null,
   hr: null,
+  rr: null,
   set: (partial) => set(partial),
 }));
 

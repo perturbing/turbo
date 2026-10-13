@@ -59,6 +59,7 @@ export class RideEngine {
   private cadence: Fresh | null = null;
   private speed: Fresh | null = null;
   private hr: Fresh | null = null;
+  private rrPending: number[] = [];
 
   private samples: RideSample[] = [];
   private flushedSamples = 0;
@@ -215,6 +216,7 @@ export class RideEngine {
     if (u.speedKmh !== undefined && u.source === 'trainer-bike')
       this.speed = { value: u.speedKmh, atMs: u.ts };
     if (u.hrBpm !== undefined) this.hr = { value: u.hrBpm, atMs: u.ts };
+    if (u.rrIntervalsS) for (const rr of u.rrIntervalsS) this.rrPending.push(Math.round(rr * 1000));
   }
 
   private currentTargetW(): number | null {
@@ -245,7 +247,9 @@ export class RideEngine {
       cadenceRpm: freshOrNull(this.cadence),
       speedKmh: freshOrNull(this.speed),
       hrBpm: freshOrNull(this.hr),
+      ...(this.rrPending.length ? { rrMs: this.rrPending } : {}),
     });
+    this.rrPending = [];
 
     if (this.phase === 'riding') {
       // Workout completes when the plan runs out. Checked before the target

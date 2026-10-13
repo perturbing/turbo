@@ -7,7 +7,7 @@ const TODAY = '2026-11-15';
 
 function metrics(over: Partial<RideMetrics>): RideMetrics {
   return {
-    version: 'metrics-v1',
+    version: 'metrics-v2',
     recordingId: 'x',
     date: TODAY,
     ftpUsed: 200,
@@ -21,6 +21,8 @@ function metrics(over: Partial<RideMetrics>): RideMetrics {
     decouplingPct: 3,
     compliancePct: 95,
     plannedPeakIntensity: 0.75,
+    thresholds: null,
+    cpTest: null,
     ...over,
   };
 }
@@ -118,6 +120,6 @@ describe('form verdict (form-v1)', () => {
     const series = performanceSeries(loads, [], TODAY, TODAY);
     const v = assessForm(series, TODAY, rides, 3);
     expect(v.testReady).toBe(false); // form is negative on a steady schedule
-    expect(v.reasons.at(-1)).toContain('ramp test is planned within 3 days');
+    expect(v.reasons.at(-1)).toContain('maximal test is planned within 3 days');
   });
 });
