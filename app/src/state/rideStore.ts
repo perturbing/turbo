@@ -14,6 +14,7 @@ export interface PreparedSession {
   mode: RideMode;
   ftpUsed: number | null;
   name: string;
+  intensityPct?: number;
 }
 
 interface RideState {
@@ -24,6 +25,7 @@ interface RideState {
   prepare: (session: PreparedSession) => void;
   startRide: () => Promise<void>;
   clearFinished: () => void;
+  updateFinished: (patch: Partial<RideRecording>) => void;
 }
 
 let engineUnsubs: Unsubscribe[] = [];
@@ -51,6 +53,7 @@ export const useRideStore = create<RideState>((set, get) => ({
       plan: prepared.plan,
       recipeId: prepared.recipe?.id,
       recipeRevision: prepared.recipe?.revision,
+      intensityPct: prepared.intensityPct,
       trainer: getTrainer(),
       // HR is piped from the device store below instead of binding an HRM
       // instance at start — a strap that connects mid-ride is then recorded too.
@@ -90,4 +93,5 @@ export const useRideStore = create<RideState>((set, get) => ({
   },
 
   clearFinished: () => set({ lastFinished: null }),
+  updateFinished: (patch) => set((s) => (s.lastFinished ? { lastFinished: { ...s.lastFinished, ...patch } } : {})),
 }));

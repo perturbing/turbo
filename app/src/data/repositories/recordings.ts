@@ -22,8 +22,9 @@ export async function saveRecording(recording: RideRecording): Promise<void> {
 
 export async function deleteRecording(id: string): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction(['recordings', 'samples'], 'readwrite');
+  const tx = db.transaction(['recordings', 'samples', 'rideMetrics'], 'readwrite');
   await tx.objectStore('recordings').delete(id);
+  await tx.objectStore('rideMetrics').delete(id);
   const range = IDBKeyRange.bound([id, 0], [id, Infinity]);
   let cursor = await tx.objectStore('samples').openCursor(range);
   while (cursor) {

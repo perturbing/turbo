@@ -74,6 +74,11 @@ export const RideRecording = z.object({
   mode: RideMode,
   resolvedPlan: ResolvedPlan.nullable(), // null for an open-ended ramp test
   state: RecordingState,
+  // Targets were scaled by this percentage at setup (100 = plan as written).
+  // FTP stays the ruler; this is how load is nudged between tests.
+  intensityPct: z.number().positive().optional(),
+  // Rider's effort rating after the ride, Borg CR10 (1 easy .. 10 all out).
+  effortRating: z.number().int().min(1).max(10).optional(),
   events: z.array(RideEvent),
   summary: z
     .object({

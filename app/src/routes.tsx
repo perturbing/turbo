@@ -12,6 +12,7 @@ import { DevicesScreen } from './screens/devices/DevicesScreen';
 import { CalendarScreen } from './screens/calendar/CalendarScreen';
 import { YourDataScreen } from './screens/data/YourDataScreen';
 import { RecordingDetailScreen } from './screens/data/RecordingDetailScreen';
+import { FormScreen } from './screens/form/FormScreen';
 
 // Hash routing keeps the app servable from any static file host.
 export const router = createHashRouter([
@@ -26,6 +27,7 @@ export const router = createHashRouter([
       { path: 'ride', element: <LiveRideScreen /> },
       { path: 'complete', element: <CompletionScreen /> },
       { path: 'calendar', element: <CalendarScreen /> },
+      { path: 'form', element: <FormScreen /> },
       { path: 'training', element: <TrainingLevelScreen /> },
       { path: 'training/ramp', element: <RampTestScreen /> },
       { path: 'training/result', element: <RampResultScreen /> },

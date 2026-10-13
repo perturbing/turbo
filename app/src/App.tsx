@@ -37,6 +37,9 @@ export function App() {
           <NavLink to="/calendar" className={({ isActive }) => (isActive ? 'active' : '')}>
             Calendar
           </NavLink>
+          <NavLink to="/form" className={({ isActive }) => (isActive ? 'active' : '')}>
+            Form
+          </NavLink>
           <NavLink to="/training" className={({ isActive }) => (isActive ? 'active' : '')}>
             Training level
           </NavLink>

@@ -33,6 +33,7 @@ export interface EngineOptions {
   plan: ResolvedPlan | null; // null for the open-ended ramp test
   recipeId?: string;
   recipeRevision?: number;
+  intensityPct?: number;
   trainer: Trainer | null;
   hrm: HeartRateMonitor | null;
 }
@@ -385,6 +386,7 @@ export class RideEngine {
       mode: this.opts.mode,
       resolvedPlan: this.opts.plan,
       state,
+      ...(this.opts.intensityPct !== undefined ? { intensityPct: this.opts.intensityPct } : {}),
       events: [...this.events],
       summary: {
         durationS: Math.round(this.rideElapsedS),

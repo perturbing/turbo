@@ -469,3 +469,114 @@ table.data th.num {
     animation: none !important;
   }
 }
+
+/* Metric explainers and glossary */
+.explain-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  margin-left: 0.25rem;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  vertical-align: middle;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+.explain-toggle:hover,
+.explain-toggle[aria-expanded='true'] {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.explain-popover {
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  max-width: 48ch;
+}
+.explain-popover p {
+  margin: 0.4rem 0;
+}
+.metric-tile.explained .label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+.metric-tile.explained .explain-popover {
+  position: absolute;
+  z-index: 5;
+  min-width: 280px;
+}
+.metric-tile.explained {
+  position: relative;
+}
+.glossary-entry {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+}
+.glossary-entry summary {
+  cursor: pointer;
+}
+.glossary-entry p {
+  margin: 0.4rem 0;
+}
+
+/* Effort rating */
+.effort-scale {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.effort-btn {
+  min-width: 2.4rem;
+  padding: 0.4rem 0;
+  font-variant-numeric: tabular-nums;
+}
+.effort-btn.selected {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #fff;
+}
+
+/* Form verdict */
+.verdict {
+  border-width: 2px;
+}
+.verdict-ok {
+  border-color: var(--ok);
+}
+.verdict-warn {
+  border-color: var(--warn);
+}
+.verdict-danger {
+  border-color: var(--danger);
+}
+.verdict .reasons {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.verdict .reasons li {
+  margin: 0.3rem 0;
+}
+
+/* Intensity dial */
+.intensity-dial {
+  gap: 4px;
+  flex-wrap: wrap;
+}

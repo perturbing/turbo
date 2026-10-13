@@ -7,12 +7,20 @@ import { formatDuration } from '../../engine/planResolve';
 import { PowerProfileChart } from '../../components/PowerProfileChart';
 import { TimeSeriesChart } from '../../components/TimeSeriesChart';
 import { Pill } from '../../components/StatusPill';
+import { saveRecording } from '../../data/repositories/recordings';
+import { metricsFor } from '../../data/repositories/rideMetrics';
+import type { RideMetrics } from '../../engine/metrics';
+import { useSettingsStore } from '../../state/settingsStore';
+import { EffortRating } from '../../components/EffortRating';
+import { RideMetricsTiles } from '../../components/RideMetricsTiles';
 
 export function RecordingDetailScreen() {
   const { recordingId } = useParams();
   const [recording, setRecording] = useState<RideRecording | null>(null);
   const [samples, setSamples] = useState<RideSample[]>([]);
   const [missing, setMissing] = useState(false);
+  const [metrics, setMetrics] = useState<RideMetrics | null>(null);
+  const ftp = useSettingsStore((s) => s.settings.currentFtpW);
 
   useEffect(() => {
     if (!recordingId) return;
@@ -24,8 +32,16 @@ export function RecordingDetailScreen() {
       }
       setRecording(rec);
       setSamples(await loadSamples(recordingId));
+      if (rec.state !== 'in-progress') setMetrics(await metricsFor(rec, ftp));
     })();
-  }, [recordingId]);
+  }, [recordingId, ftp]);
+
+  const rate = async (effortRating: number) => {
+    if (!recording) return;
+    const next = { ...recording, effortRating };
+    setRecording(next);
+    await saveRecording(next);
+  };
 
   if (missing)
     return (
@@ -62,7 +78,8 @@ export function RecordingDetailScreen() {
         <Pill kind={recording.state === 'completed' ? 'ok' : 'warn'}>{recording.state}</Pill>
         <span className="muted small">
           {new Date(recording.startedAt).toLocaleString()} · {recording.mode.toUpperCase()} · FTP used:{' '}
-          {recording.ftpUsed ? `${recording.ftpUsed} W` : '—'} ·{' '}
+          {recording.ftpUsed ? `${recording.ftpUsed} W` : '—'}
+          {recording.intensityPct && recording.intensityPct !== 100 ? ` · intensity ${recording.intensityPct}%` : ''} ·{' '}
           {formatDuration(recording.summary?.durationS ?? 0)}
         </span>
       </div>
@@ -102,6 +119,18 @@ export function RecordingDetailScreen() {
             <div className="label">Energy</div>
             <div className="value">{recording.summary.energyKj ?? '—'} <span className="unit">kJ</span></div>
           </div>
+        </div>
+      ) : null}
+
+      {metrics ? (
+        <div className="card stack">
+          <h2 style={{ margin: 0 }}>Training load</h2>
+          <RideMetricsTiles metrics={metrics} />
+        </div>
+      ) : null}
+      {recording.kind === 'workout' ? (
+        <div className="card">
+          <EffortRating value={recording.effortRating} onChange={(v) => void rate(v)} />
         </div>
       ) : null}
 

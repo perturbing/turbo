@@ -3,7 +3,7 @@
 //   D-pad right/down-> focus next control (scoped to an open dialog/drawer)
 //   A               -> activate the focused control (click)
 //   B               -> close the open dialog/drawer, else history back
-//   Y               -> cycle main sections (Workouts -> Training -> Devices -> Data)
+//   Y               -> cycle main sections (Workouts -> Calendar -> Form -> Training -> Devices -> Data)
 //   Z               -> pause/resume toggle during a workout ride
 //   Shift paddles   -> virtual gears in Shift mode (wired in rideStore)
 // All mapping is suppressed while the button-check drawer ([data-pod-capture])
@@ -13,7 +13,7 @@ import { useDeviceStore } from '../state/deviceStore';
 import { useRideStore } from '../state/rideStore';
 import type { RideButton } from '../ble/decoders/zwiftRide';
 
-const SECTIONS = ['/workouts', '/calendar', '/training', '/devices', '/data'];
+const SECTIONS = ['/workouts', '/calendar', '/form', '/training', '/devices', '/data'];
 const FOCUS_CLASS = 'pod-focus';
 
 export function initPodNavigation(): void {

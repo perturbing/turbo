@@ -78,6 +78,21 @@ export function resolvePlan(recipe: WorkoutRecipe, ftpW: number | null): Resolve
   return { totalS: t, steps };
 }
 
+// Scale every target by a percentage (the per-ride intensity dial). FTP is
+// untouched: the recording keeps both, so metrics stay comparable.
+export function scalePlan(plan: ResolvedPlan, intensityPct: number): ResolvedPlan {
+  if (intensityPct === 100) return plan;
+  const k = intensityPct / 100;
+  return {
+    totalS: plan.totalS,
+    steps: plan.steps.map((s) => ({
+      ...s,
+      targetW: Math.round(s.targetW * k),
+      ...(s.targetEndW !== undefined ? { targetEndW: Math.round(s.targetEndW * k) } : {}),
+    })),
+  };
+}
+
 // Target power at a moment within the plan (linear interpolation inside ramps).
 export function targetAt(plan: ResolvedPlan, elapsedS: number): ResolvedStep | null {
   const step = plan.steps.find((s) => elapsedS >= s.startS && elapsedS < s.endS);

@@ -7,6 +7,16 @@ import type {
   Settings,
   WorkoutRecipe,
 } from './schema';
+import type { RideMetrics } from '../engine/metrics';
+
+// Derived per-ride metrics (NP, TSS, EF, …), cached so the Form screen does
+// not reload every sample of every ride. Recomputed when METRICS_VERSION
+// changes; never exported (they follow from the samples).
+export interface StoredRideMetrics {
+  recordingId: string;
+  computedAt: string;
+  metrics: RideMetrics;
+}
 
 export interface BikeDB extends DBSchema {
   recipes: { key: string; value: WorkoutRecipe };
@@ -27,6 +37,7 @@ export interface BikeDB extends DBSchema {
     value: PlannedWorkout;
     indexes: { byDate: string };
   };
+  rideMetrics: { key: string; value: StoredRideMetrics };
 }
 
 // Minimum version. Store creation below is EXISTENCE-based (not version
@@ -35,7 +46,7 @@ export interface BikeDB extends DBSchema {
 // recovers from any historical/mixed-version state without data loss.
 const DB_VERSION = 2;
 
-const EXPECTED_STORES = ['recipes', 'recordings', 'samples', 'ftpHistory', 'settings', 'plans'] as const;
+const EXPECTED_STORES = ['recipes', 'recordings', 'samples', 'ftpHistory', 'settings', 'plans', 'rideMetrics'] as const;
 
 let dbPromise: Promise<IDBPDatabase<BikeDB>> | null = null;
 
@@ -58,6 +69,7 @@ function openOptions() {
         const plans = db.createObjectStore('plans', { keyPath: 'id' });
         plans.createIndex('byDate', 'date');
       }
+      if (!db.objectStoreNames.contains('rideMetrics')) db.createObjectStore('rideMetrics', { keyPath: 'recordingId' });
     },
     // Another open tab runs a NEWER version and wants to upgrade: close this
     // connection so it isn't blocked; the next operation here reopens.

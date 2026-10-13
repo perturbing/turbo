@@ -5,7 +5,9 @@ import { useSettingsStore } from '../../state/settingsStore';
 import { useRideStore } from '../../state/rideStore';
 import { PowerProfileChart } from '../../components/PowerProfileChart';
 import { ReadinessChecklist, useReadiness } from '../../components/ReadinessChecklist';
-import { formatDuration, recipeNeedsFtp, resolvePlan } from '../../engine/planResolve';
+import { formatDuration, recipeNeedsFtp, resolvePlan, scalePlan } from '../../engine/planResolve';
+import { plannedTss } from '../../engine/metrics';
+import { Explain } from '../../components/Explain';
 import type { RideMode } from '../../data/schema';
 import { DevicesDrawer } from './DevicesDrawer';
 import { exportRecipe, downloadFile } from '../../data/exportImport';
@@ -20,6 +22,7 @@ export function WorkoutSetupScreen() {
   const [mode, setMode] = useState<RideMode | null>(null);
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [intensity, setIntensity] = useState(100);
 
   useEffect(() => {
     if (!loaded) void refresh();
@@ -33,11 +36,12 @@ export function WorkoutSetupScreen() {
   const plan = useMemo(() => {
     if (!recipe) return null;
     try {
-      return resolvePlan(recipe, ftp);
+      return scalePlan(resolvePlan(recipe, ftp), intensity);
     } catch {
       return null; // FTP missing
     }
-  }, [recipe, ftp]);
+  }, [recipe, ftp, intensity]);
+  const load = plan && ftp ? plannedTss(plan, ftp) : null;
 
   if (!loaded) return <main className="screen">Loading…</main>;
   if (!recipe)
@@ -52,7 +56,7 @@ export function WorkoutSetupScreen() {
     if (!plan) return;
     // Snapshot FTP + fully resolved plan into the session now; later FTP or
     // recipe edits must not alter what this ride was meant to do.
-    prepare({ kind: 'workout', recipe, plan, mode: effectiveMode, ftpUsed: ftp, name: recipe.name });
+    prepare({ kind: 'workout', recipe, plan, mode: effectiveMode, ftpUsed: ftp, name: recipe.name, intensityPct: intensity });
     navigate('/ride');
   };
 
@@ -89,7 +93,14 @@ export function WorkoutSetupScreen() {
 
       <div className="row">
         <div className="card" style={{ flex: 2, minWidth: 320 }}>
-          <h2 style={{ marginTop: 0 }}>Segments {ftp ? <span className="muted small">at FTP {ftp} W</span> : null}</h2>
+          <h2 style={{ marginTop: 0 }}>
+            Segments{' '}
+            {ftp ? (
+              <span className="muted small">
+                at FTP {ftp} W{intensity !== 100 ? ` × ${intensity}%` : ''}
+              </span>
+            ) : null}
+          </h2>
           <table className="data">
             <thead>
               <tr>
@@ -141,6 +152,39 @@ export function WorkoutSetupScreen() {
             {effectiveMode === 'erg'
               ? 'The trainer adjusts resistance to hold each target.'
               : 'You use virtual gears and cadence to meet the planned target.'}
+          </p>
+          <h2>
+            Intensity <Explain term="intensity" />
+          </h2>
+          <div className="row intensity-dial">
+            {[90, 95, 100, 105, 110].map((pct) => (
+              <button key={pct} className={intensity === pct ? 'primary' : ''} onClick={() => setIntensity(pct)}>
+                {pct}%
+              </button>
+            ))}
+          </div>
+          <div className="row" style={{ gap: 4 }}>
+            <button className="small" onClick={() => setIntensity((v) => Math.max(50, v - 1))}>
+              −1
+            </button>
+            <button className="small" onClick={() => setIntensity((v) => Math.min(150, v + 1))}>
+              +1
+            </button>
+            {intensity !== 100 ? (
+              <button className="small" onClick={() => setIntensity(100)}>
+                Reset
+              </button>
+            ) : null}
+          </div>
+          <p className="muted small">
+            {load !== null ? (
+              <>
+                Planned load {Math.round(load)} TSS <Explain term="tss" />
+                {intensity !== 100 ? ` at ${intensity}% (targets scaled; FTP stays ${ftp} W).` : '.'}
+              </>
+            ) : (
+              'Set an FTP to see the planned load.'
+            )}
           </p>
           <h2>Readiness</h2>
           <ReadinessChecklist readiness={readiness} />

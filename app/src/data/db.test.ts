@@ -72,6 +72,7 @@ describe('database self-healing', () => {
         db.createObjectStore('settings');
         const plans = db.createObjectStore('plans', { keyPath: 'id' });
         plans.createIndex('byDate', 'date');
+        db.createObjectStore('rideMetrics', { keyPath: 'recordingId' });
       },
     });
     newer.close();

@@ -59,7 +59,12 @@ while the button-check drawer is open.
 - `src/engine/` — UI-independent ride engine (state machine, 1 Hz sampling, desired-state trainer
   controller — the engine declares the target, `trainerController.ts` keeps the device there with
   acks, retries, deadlines, re-apply after reconnect and a periodic re-assert — ERG scheduling,
-  autosave), plan resolution, ramp-test method (`ramp-v1`), virtual gears.
+  autosave), plan resolution, ramp-test method (`ramp-v1`), virtual gears, and the training-load
+  math: `metrics.ts` (NP / IF / TSS / efficiency factor / decoupling / compliance per ride, cached in
+  the `rideMetrics` store and recomputed when `METRICS_VERSION` changes), `performance.ts`
+  (fitness / fatigue / form with a projection from the calendar) and `verdict.ts` (the named
+  `form-v1` load / hold / rest rules). Every metric has a plain-language entry in `ui/glossary.ts`
+  that the UI shows inline.
 - `src/data/` — zod schemas (every record carries `schemaVersion`), IndexedDB stores, migration
   chain, export/import envelope, built-in workouts, FIT stub (`exportFit.ts`).
 - `src/screens/` — Workouts / Builder / Setup / Live ride / Training level / Ramp test /
