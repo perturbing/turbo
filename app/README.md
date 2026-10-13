@@ -56,7 +56,9 @@ while the button-check drawer is open.
   from the real device logs), `trainer.ts` (FTMS control with ack-gated commands under a deadline — a write that never settles is
   reported as failed and retried, two in a row reset the GATT link and reconnect), `ridePods.ts`
   (dual-pod merge + `RideOn` handshake), `deviceManager.ts` (lifecycle/reconnect), `mock/`.
-- `src/engine/` — UI-independent ride engine (state machine, 1 Hz sampling, ERG scheduling,
+- `src/engine/` — UI-independent ride engine (state machine, 1 Hz sampling, desired-state trainer
+  controller — the engine declares the target, `trainerController.ts` keeps the device there with
+  acks, retries, deadlines, re-apply after reconnect and a periodic re-assert — ERG scheduling,
   autosave), plan resolution, ramp-test method (`ramp-v1`), virtual gears.
 - `src/data/` — zod schemas (every record carries `schemaVersion`), IndexedDB stores, migration
   chain, export/import envelope, built-in workouts, FIT stub (`exportFit.ts`).
