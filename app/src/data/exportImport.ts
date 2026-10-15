@@ -36,17 +36,32 @@ export const ExportEnvelope = z.object({
   }),
   // Current FTP + preferences; optional so older exports stay importable.
   settings: z.unknown().optional(),
+  // Why the file was made when it was not a routine export, e.g. the save
+  // error behind an emergency export during a ride.
+  reason: z.string().optional(),
 });
 export type ExportEnvelope = z.infer<typeof ExportEnvelope>;
 
-function makeEnvelope(records: ExportEnvelope['records'], settings?: Settings): ExportEnvelope {
+function makeEnvelope(records: ExportEnvelope['records'], settings?: Settings, reason?: string): ExportEnvelope {
   return {
     format: ENVELOPE_FORMAT,
     envelopeVersion: ENVELOPE_VERSION,
     exportedAt: new Date().toISOString(),
     records,
     ...(settings ? { settings } : {}),
+    ...(reason ? { reason } : {}),
   };
+}
+
+// A ride straight from the engine's memory, for when the database does not
+// (yet, or any more) hold it: the live screen's emergency export and the
+// completion screen after a failed save. Same envelope, so it imports.
+export function exportUnsavedRecording(
+  recording: RideRecording,
+  samples: readonly RideSample[],
+  reason?: string,
+): ExportEnvelope {
+  return makeEnvelope({ recipes: [], recordings: [{ ...recording, samples: [...samples] }], ftpObservations: [], plans: [] }, undefined, reason);
 }
 
 export async function exportAll(): Promise<ExportEnvelope> {
@@ -82,8 +97,9 @@ export function exportRecipe(recipe: WorkoutRecipe): ExportEnvelope {
 export interface ImportItem<T> {
   record: T;
   samples?: RideSample[];
-  // skip: identical id already present; copy: same id, different content -> import under new id
-  action: 'add' | 'skip' | 'copy';
+  // skip: identical id already present; copy: same id, different content -> import under new id;
+  // replace: same id, the file holds more of the record than the database (recordings only)
+  action: 'add' | 'skip' | 'copy' | 'replace';
   reason?: string;
 }
 
@@ -167,8 +183,23 @@ export async function previewImport(json: string): Promise<ImportPreview> {
       const rec = RideRecording.parse(migrateRecord<RideRecording>('recording', rest));
       const parsedSamples = z.array(RideSample).parse(samples ?? []);
       const existing = existingRecordings.find((r) => r.id === rec.id);
-      if (!existing) preview.recordings.push({ record: rec, samples: parsedSamples, action: 'add' });
-      else preview.recordings.push({ record: rec, samples: parsedSamples, action: 'skip', reason: 'already present' });
+      if (!existing) {
+        preview.recordings.push({ record: rec, samples: parsedSamples, action: 'add' });
+        continue;
+      }
+      // A ride whose save failed mid-way leaves a partial copy in the database;
+      // the emergency export of the same ride is the complete one and wins.
+      const stored = await safe(loadSamples(rec.id));
+      if (parsedSamples.length > stored.length) {
+        preview.recordings.push({
+          record: rec,
+          samples: parsedSamples,
+          action: 'replace',
+          reason: `file holds ${parsedSamples.length} samples, ${stored.length} stored`,
+        });
+      } else {
+        preview.recordings.push({ record: rec, samples: parsedSamples, action: 'skip', reason: 'already present' });
+      }
     } catch (e) {
       preview.errors.push(describeRecordError('recording', raw, e));
     }
@@ -244,7 +275,7 @@ const SAMPLES_PER_CHUNK = 60;
 export async function commitImport(preview: ImportPreview): Promise<{ added: number }> {
   const db = await getDb();
   let added = 0;
-  const tx = db.transaction(['recipes', 'recordings', 'samples', 'ftpHistory', 'plans'], 'readwrite');
+  const tx = db.transaction(['recipes', 'recordings', 'samples', 'ftpHistory', 'plans', 'rideMetrics'], 'readwrite');
 
   for (const item of preview.recipes) {
     if (item.action === 'skip') continue;
@@ -258,6 +289,18 @@ export async function commitImport(preview: ImportPreview): Promise<{ added: num
 
   for (const item of preview.recordings) {
     if (item.action === 'skip') continue;
+    if (item.action === 'replace') {
+      // Autosave chunks are smaller than import chunks, so the old range can
+      // have more chunk indices: clear it rather than overwrite by index.
+      const range = IDBKeyRange.bound([item.record.id, 0], [item.record.id, Infinity]);
+      let cursor = await tx.objectStore('samples').openCursor(range);
+      while (cursor) {
+        await cursor.delete();
+        cursor = await cursor.continue();
+      }
+      // Cached metrics were computed over the partial samples.
+      await tx.objectStore('rideMetrics').delete(item.record.id);
+    }
     await tx.objectStore('recordings').put(item.record);
     const samples = item.samples ?? [];
     for (let i = 0; i * SAMPLES_PER_CHUNK < samples.length; i++) {

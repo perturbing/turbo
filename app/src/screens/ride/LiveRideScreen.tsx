@@ -6,7 +6,7 @@ import { MetricTile } from '../../components/MetricTile';
 import { RoadView } from '../../components/RoadView';
 import { PowerProfileChart } from '../../components/PowerProfileChart';
 import { formatDuration } from '../../engine/planResolve';
-import { downloadFile } from '../../data/exportImport';
+import { downloadFile, exportUnsavedRecording } from '../../data/exportImport';
 import { Pill } from '../../components/StatusPill';
 import { useWakeLock } from '../../hooks/useWakeLock';
 
@@ -56,7 +56,11 @@ export function LiveRideScreen() {
             onClick={() =>
               downloadFile(
                 `ride-emergency-${new Date().toISOString()}.json`,
-                JSON.stringify({ samples: engine.getSamples(), events: engine.getEvents() }, null, 2),
+                JSON.stringify(
+                  exportUnsavedRecording(engine.recordingSoFar(), engine.getSamples(), `Emergency export: ${s.saveError}`),
+                  null,
+                  2,
+                ),
               )
             }
           >

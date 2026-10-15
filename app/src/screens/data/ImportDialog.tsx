@@ -13,6 +13,7 @@ export function ImportDialog({
   const adds = (items: { action: string }[]) => items.filter((i) => i.action !== 'skip').length;
   const skips = (items: { action: string }[]) => items.filter((i) => i.action === 'skip').length;
   const copies = preview.recipes.filter((i) => i.action === 'copy');
+  const replacements = preview.recordings.filter((i) => i.action === 'replace');
   const totalAdds =
     adds(preview.recipes) + adds(preview.recordings) + adds(preview.ftpObservations) + adds(preview.plans);
 
@@ -61,6 +62,12 @@ export function ImportDialog({
           <div className="banner small">
             {copies.length} workout(s) exist with the same ID but different content — they will be imported as
             copies, keeping both versions.
+          </div>
+        ) : null}
+        {replacements.length > 0 ? (
+          <div className="banner small">
+            {replacements.length} ride(s) already present but with fewer samples than the file — the stored copy
+            will be replaced (e.g. a ride exported after a failed save).
           </div>
         ) : null}
         {preview.errors.length > 0 ? (

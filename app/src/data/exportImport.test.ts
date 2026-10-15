@@ -14,6 +14,7 @@ import {
   commitImport,
   exportAll,
   exportRecording,
+  exportUnsavedRecording,
   ImportFormatError,
   previewImport,
   recordingToCsv,
@@ -166,6 +167,30 @@ describe('export -> import round-trip into a clean installation', () => {
     expect(preview.recipes.every((r) => r.action === 'skip')).toBe(true);
     const { added } = await commitImport(preview);
     expect(added).toBe(0);
+  });
+
+  it('a ride exported after a failed save replaces the partial copy in the database', async () => {
+    freshDb();
+    // What a failed save leaves behind: the header plus the first autosaved chunks.
+    await saveRecording(recording);
+    await saveSampleChunk({ schemaVersion: 1, recordingId: recording.id, chunkIndex: 0, samples: samples.slice(0, 10) });
+    await saveSampleChunk({ schemaVersion: 1, recordingId: recording.id, chunkIndex: 1, samples: samples.slice(10, 20) });
+    expect((await loadSamples(recording.id)).length).toBe(20);
+
+    const envelope = exportUnsavedRecording(recording, samples, 'Emergency export: test');
+    expect(envelope.reason).toBe('Emergency export: test');
+    const preview = await previewImport(JSON.stringify(envelope));
+    expect(preview.recordings[0].action).toBe('replace');
+
+    await commitImport(preview);
+    const restored = await loadSamples(recording.id);
+    expect(restored.length).toBe(samples.length);
+    expect(restored.map((s) => s.elapsedS)).toEqual(samples.map((s) => s.elapsedS));
+    expect((await listRecordings()).length).toBe(1);
+
+    // Same file again: nothing more to gain, so it is a plain duplicate.
+    const again = await previewImport(JSON.stringify(envelope));
+    expect(again.recordings[0].action).toBe('skip');
   });
 
   it('imports a conflicting recipe revision as a copy', async () => {

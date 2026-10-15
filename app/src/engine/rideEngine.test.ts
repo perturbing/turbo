@@ -8,6 +8,20 @@ import { MockTrainer } from '../ble/mock/mockTrainer';
 import { RideEngine } from './rideEngine';
 import type { ResolvedPlan } from '../data/schema';
 
+// Lets a test make every sample-chunk write fail while the real repository
+// still backs everything else.
+const chunkWrite = vi.hoisted(() => ({ error: null as Error | null }));
+vi.mock('../data/repositories/recordings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../data/repositories/recordings')>();
+  return {
+    ...actual,
+    saveSampleChunk: async (chunk: Parameters<typeof actual.saveSampleChunk>[0]) => {
+      if (chunkWrite.error) throw chunkWrite.error;
+      return actual.saveSampleChunk(chunk);
+    },
+  };
+});
+
 const plan: ResolvedPlan = {
   totalS: 12,
   steps: [
@@ -24,7 +38,90 @@ describe('RideEngine end-to-end with mock trainer', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'Date'] });
   });
   afterEach(() => {
+    chunkWrite.error = null;
     vi.useRealTimers();
+  });
+
+  async function connectedTrainer(): Promise<MockTrainer> {
+    const trainer = new MockTrainer();
+    const connectP = trainer.connect();
+    await vi.advanceTimersByTimeAsync(700);
+    await connectP;
+    return trainer;
+  }
+
+  it('a zero RR interval from the strap is dropped, not recorded (2026-10-15 ride)', async () => {
+    const engine = new RideEngine({
+      kind: 'workout',
+      recordingId: 'rr-ride',
+      name: 'RR ride',
+      mode: 'erg',
+      ftpUsed: 200,
+      plan,
+      trainer: await connectedTrainer(),
+      hrm: null,
+    });
+    await engine.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    // A missed beat shows up as a 0 s interval between two real ones.
+    engine.pushTelemetry({ source: 'hrm', ts: Date.now(), hrBpm: 116, rrIntervalsS: [0.52, 0, 0.53] });
+    // Let the autosave at 10 s and the finish both write.
+    await vi.advanceTimersByTimeAsync(14_000);
+    await vi.waitFor(() => expect(engine.snapshot().phase).toBe('finished'));
+
+    expect(engine.snapshot().saveError).toBeNull();
+    const samples = await loadSamples('rr-ride');
+    expect(samples.map((s) => s.elapsedS)).toEqual(engine.getSamples().map((s) => s.elapsedS));
+    expect(samples.find((s) => s.rrMs)?.rrMs).toEqual([520, 530]);
+    expect((await getRecording('rr-ride'))!.state).toBe('completed');
+  });
+
+  it('a sample the schema rejects is stored without its bad values instead of blocking every later save', async () => {
+    const engine = new RideEngine({
+      kind: 'workout',
+      recordingId: 'nan-ride',
+      name: 'NaN ride',
+      mode: 'erg',
+      ftpUsed: 200,
+      plan,
+      trainer: await connectedTrainer(),
+      hrm: null,
+    });
+    await engine.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    engine.pushTelemetry({ source: 'hrm', ts: Date.now(), hrBpm: Number.NaN });
+    await vi.advanceTimersByTimeAsync(14_000);
+    await vi.waitFor(() => expect(engine.snapshot().phase).toBe('finished'));
+
+    expect(engine.snapshot().saveError).toBeNull();
+    const samples = await loadSamples('nan-ride');
+    expect(samples.length).toBe(engine.getSamples().length);
+    expect(samples.every((s) => s.hrBpm === null)).toBe(true);
+  });
+
+  it('the header is still saved when a sample chunk cannot be written, and the error is surfaced', async () => {
+    const engine = new RideEngine({
+      kind: 'workout',
+      recordingId: 'chunk-fail-ride',
+      name: 'Chunk fail ride',
+      mode: 'erg',
+      ftpUsed: 200,
+      plan,
+      trainer: await connectedTrainer(),
+      hrm: null,
+    });
+    await engine.start();
+    chunkWrite.error = new Error('samples store is broken');
+    await vi.advanceTimersByTimeAsync(11_000); // autosave at 10 s fails
+    expect(engine.snapshot().saveError).toBe('samples store is broken');
+
+    const rec = await engine.finish('ended-early');
+    expect(engine.snapshot().saveError).toBe('samples store is broken');
+    // The final header landed regardless of the chunk failure.
+    const saved = await getRecording('chunk-fail-ride');
+    expect(saved!.state).toBe('ended-early');
+    expect(saved!.summary?.durationS).toBe(rec.summary?.durationS);
+    expect(await loadSamples('chunk-fail-ride')).toEqual([]);
   });
 
   it('runs a short ERG workout: targets acked, samples recorded, recording saved', async () => {

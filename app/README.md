@@ -75,7 +75,10 @@ while the button-check drawer is open.
 
 ### Data ownership
 
-- Everything is stored locally; recordings autosave every ~10 s during a ride.
+- Everything is stored locally; recordings autosave every ~10 s during a ride. Header and sample
+  chunks are written independently, a sample the schema rejects is stored without its bad values,
+  and a save error shows a banner (live and on the completion screen) with an export of the whole
+  ride straight from memory, in the normal envelope, so it can be imported.
 - "Export all" produces one JSON envelope (recipes, recordings with samples, FTP history) that
   imports into a clean installation without loss — this is the device-replacement path.
 - Old schema versions stay importable through the per-record migration chain; newer-than-known

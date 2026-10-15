@@ -1,5 +1,6 @@
 import type { Trainer, HeartRateMonitor, TelemetryUpdate, Unsubscribe } from '../ble/types';
-import type { ResolvedPlan, ResolvedStep, RideEvent, RideMode, RideRecording, RideSample } from '../data/schema';
+import type { ResolvedPlan, ResolvedStep, RideEvent, RideMode, RideRecording } from '../data/schema';
+import { RideSample } from '../data/schema';
 import { saveRecording, saveSampleChunk } from '../data/repositories/recordings';
 import { interpolatedTargetW, targetAt } from './planResolve';
 import { clampGear, DEFAULT_GEAR, gearToGradePct } from './virtualGears';
@@ -116,6 +117,13 @@ export class RideEngine {
     return this.events;
   }
 
+  // The recording as it stands right now (in-progress header until finished).
+  // Feeds the emergency export so an unsaved ride leaves the phone as a file
+  // the app can import, not just a bag of samples.
+  recordingSoFar(): RideRecording {
+    return this.finishedRecording ?? this.buildRecording('in-progress');
+  }
+
   snapshot(): EngineSnapshot {
     const now = Date.now();
     const freshOrNull = (f: Fresh | null) => (f && now - f.atMs <= FRESHNESS_MS ? f.value : null);
@@ -216,7 +224,14 @@ export class RideEngine {
     if (u.speedKmh !== undefined && u.source === 'trainer-bike')
       this.speed = { value: u.speedKmh, atMs: u.ts };
     if (u.hrBpm !== undefined) this.hr = { value: u.hrBpm, atMs: u.ts };
-    if (u.rrIntervalsS) for (const rr of u.rrIntervalsS) this.rrPending.push(Math.round(rr * 1000));
+    if (u.rrIntervalsS) {
+      for (const rr of u.rrIntervalsS) {
+        const ms = Math.round(rr * 1000);
+        // Straps report 0 for a missed beat (2026-10-15 ride: two zeros at
+        // 230 s). Not an interval, so not recorded.
+        if (Number.isFinite(ms) && ms > 0) this.rrPending.push(ms);
+      }
+    }
   }
 
   private currentTargetW(): number | null {
@@ -353,10 +368,7 @@ export class RideEngine {
     const recording = this.buildRecording(state);
     this.finishedRecording = recording;
     try {
-      await this.serializedSave(async () => {
-        await this.flushSamples();
-        await saveRecording(recording);
-      });
+      await this.serializedSave(() => this.persist(recording));
       this.saveError = null;
     } catch (e) {
       this.saveError = e instanceof Error ? e.message : 'save failed';
@@ -418,9 +430,29 @@ export class RideEngine {
     }
   }
 
+  // Samples and header are written independently: a chunk that cannot be
+  // written must not cost the header, nor the other way round. The first
+  // failure is rethrown once both have been attempted.
+  private async persist(recording: RideRecording): Promise<void> {
+    let failure: unknown = null;
+    try {
+      await this.flushSamples();
+    } catch (e) {
+      failure = e;
+    }
+    try {
+      await saveRecording(recording);
+    } catch (e) {
+      failure ??= e;
+    }
+    if (failure) throw failure;
+  }
+
   private async flushSamples(): Promise<void> {
     while (this.flushedSamples < this.samples.length) {
-      const chunk = this.samples.slice(this.flushedSamples, this.flushedSamples + SAMPLES_PER_CHUNK);
+      const end = Math.min(this.flushedSamples + SAMPLES_PER_CHUNK, this.samples.length);
+      for (let i = this.flushedSamples; i < end; i++) this.samples[i] = storable(this.samples[i]);
+      const chunk = this.samples.slice(this.flushedSamples, end);
       await saveSampleChunk({
         schemaVersion: 1,
         recordingId: this.opts.recordingId,
@@ -436,8 +468,7 @@ export class RideEngine {
     try {
       await this.serializedSave(async () => {
         if (this.phase === 'finished') return; // finish() writes the final record
-        await this.flushSamples();
-        await saveRecording(this.buildRecording('in-progress'));
+        await this.persist(this.buildRecording('in-progress'));
       });
       this.saveError = null;
     } catch (e) {
@@ -445,4 +476,23 @@ export class RideEngine {
       this.saveError = e instanceof Error ? e.message : 'save failed';
     }
   }
+}
+
+// A sample the schema rejects is reduced to its valid parts rather than left
+// in the unflushed tail, where it would fail every later save of the ride
+// (the 2026-10-15 ride lost 55 minutes that way to a single zero RR interval).
+function storable(s: RideSample): RideSample {
+  if (RideSample.safeParse(s).success) return s;
+  console.warn('bike-app: sample failed validation; storing its valid parts', s);
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const rr = Array.isArray(s.rrMs) ? s.rrMs.filter((x) => Number.isInteger(x) && x > 0) : [];
+  return {
+    elapsedS: Math.max(0, num(s.elapsedS) ?? 0),
+    ts: typeof s.ts === 'string' ? s.ts : new Date().toISOString(),
+    powerW: num(s.powerW),
+    cadenceRpm: num(s.cadenceRpm),
+    speedKmh: num(s.speedKmh),
+    hrBpm: num(s.hrBpm),
+    ...(rr.length ? { rrMs: rr } : {}),
+  };
 }

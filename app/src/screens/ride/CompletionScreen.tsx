@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useRideStore } from '../../state/rideStore';
-import { exportRecording, downloadFile } from '../../data/exportImport';
+import { exportRecording, exportUnsavedRecording, downloadFile } from '../../data/exportImport';
 import { formatDuration } from '../../engine/planResolve';
 import { Pill } from '../../components/StatusPill';
 import { useSettingsStore } from '../../state/settingsStore';
@@ -14,6 +14,7 @@ import { RideMetricsTiles } from '../../components/RideMetricsTiles';
 export function CompletionScreen() {
   const navigate = useNavigate();
   const recording = useRideStore((s) => s.lastFinished);
+  const saveFailure = useRideStore((s) => s.saveFailure);
   const clearFinished = useRideStore((s) => s.clearFinished);
   const updateFinished = useRideStore((s) => s.updateFinished);
   const ftp = useSettingsStore((s) => s.settings.currentFtpW);
@@ -40,7 +41,11 @@ export function CompletionScreen() {
   };
 
   const doExport = async () => {
-    const envelope = await exportRecording(recording.id);
+    // After a failed save the database is missing part of the ride; the
+    // engine's own samples are the complete record.
+    const envelope = saveFailure
+      ? exportUnsavedRecording(recording, saveFailure.samples, saveFailure.error)
+      : await exportRecording(recording.id);
     if (envelope) {
       downloadFile(`ride-${recording.startedAt.slice(0, 19)}.json`, JSON.stringify(envelope, null, 2));
       setExported(true);
@@ -50,6 +55,18 @@ export function CompletionScreen() {
   return (
     <main className="screen stack" style={{ maxWidth: 640 }}>
       <h1>{recording.state === 'completed' ? 'Workout complete' : 'Ride ended early'}</h1>
+      {saveFailure ? (
+        <div className="banner danger stack">
+          <span>
+            <strong>Saving failed:</strong> {saveFailure.error}
+          </span>
+          <span>
+            The app holds only what was autosaved before the failure. Export now to keep the full ride; it can
+            be imported from Your data later.
+          </span>
+          <button onClick={() => void doExport()}>Export full ride</button>
+        </div>
+      ) : null}
       <div className="card stack">
         <div className="row between">
           <strong>{recording.name}</strong>
@@ -81,7 +98,7 @@ export function CompletionScreen() {
           </div>
         </div>
         <p className="muted small">
-          Recording saved locally{recording.ftpUsed ? ` · FTP used: ${recording.ftpUsed} W` : ''}
+          {saveFailure ? 'Recording NOT fully saved' : 'Recording saved locally'}{recording.ftpUsed ? ` · FTP used: ${recording.ftpUsed} W` : ''}
           {recording.intensityPct && recording.intensityPct !== 100 ? ` · intensity ${recording.intensityPct}%` : ''} · mode{' '}
           {recording.mode.toUpperCase()}
         </p>

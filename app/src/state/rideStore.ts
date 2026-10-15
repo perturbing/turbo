@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { EngineSnapshot } from '../engine/rideEngine';
 import { RideEngine, type EngineOptions } from '../engine/rideEngine';
-import type { ResolvedPlan, RideMode, RideRecording, WorkoutRecipe } from '../data/schema';
+import type { ResolvedPlan, RideMode, RideRecording, RideSample, WorkoutRecipe } from '../data/schema';
 import { getPods, getTrainer } from '../ble/deviceManager';
 import { useDeviceStore } from './deviceStore';
 import type { Unsubscribe } from '../ble/types';
@@ -22,6 +22,9 @@ interface RideState {
   engine: RideEngine | null;
   snapshot: EngineSnapshot | null;
   lastFinished: RideRecording | null;
+  // Set when the finished ride could not be (fully) written: the error and the
+  // engine's samples, so the completion screen can still export the whole ride.
+  saveFailure: { error: string; samples: readonly RideSample[] } | null;
   prepare: (session: PreparedSession) => void;
   startRide: () => Promise<void>;
   clearFinished: () => void;
@@ -35,10 +38,11 @@ export const useRideStore = create<RideState>((set, get) => ({
   engine: null,
   snapshot: null,
   lastFinished: null,
+  saveFailure: null,
 
   // Clearing lastFinished here keeps the ride screens' state-driven navigation
   // from bouncing a fresh session straight to the completion screen.
-  prepare: (session) => set({ prepared: session, lastFinished: null }),
+  prepare: (session) => set({ prepared: session, lastFinished: null, saveFailure: null }),
 
   startRide: async () => {
     const prepared = get().prepared;
@@ -75,7 +79,14 @@ export const useRideStore = create<RideState>((set, get) => ({
       engine.onFinished((rec) => {
         for (const u of engineUnsubs) u();
         engineUnsubs = [];
-        set({ engine: null, snapshot: null, prepared: null, lastFinished: rec });
+        const error = engine.snapshot().saveError;
+        set({
+          engine: null,
+          snapshot: null,
+          prepared: null,
+          lastFinished: rec,
+          saveFailure: error ? { error, samples: engine.getSamples() } : null,
+        });
       }),
     );
 
@@ -95,6 +106,6 @@ export const useRideStore = create<RideState>((set, get) => ({
     await engine.start();
   },
 
-  clearFinished: () => set({ lastFinished: null }),
+  clearFinished: () => set({ lastFinished: null, saveFailure: null }),
   updateFinished: (patch) => set((s) => (s.lastFinished ? { lastFinished: { ...s.lastFinished, ...patch } } : {})),
 }));
