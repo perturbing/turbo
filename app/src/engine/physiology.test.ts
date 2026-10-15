@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RideSample } from '../data/schema';
-import { cpFromAllOut, freshness, rampHrMarkers, thresholdProfile, timeToExhaustionS, vo2maxFromMap } from './physiology';
+import { cpFromAllOut, freshness, hrMaxProfile, rampHrMarkers, thresholdProfile, timeToExhaustionS, vo2maxFromMap } from './physiology';
 
 describe('VO2max from maximal aerobic power', () => {
   it('applies Hawley & Noakes and scales by weight with an error band', () => {
@@ -41,27 +41,65 @@ describe('ramp heart-rate markers', () => {
 });
 
 describe('3-minute all-out test', () => {
-  it('derives CP from the final 30 s and W-prime from the work above it', () => {
-    // 500 W falling to 250 W over the first 90 s, then flat at 250 W.
-    const power = Array.from({ length: 180 }, (_, t) => (t < 90 ? 500 - (250 * t) / 90 : 250));
-    const r = cpFromAllOut(power)!;
+  // A textbook trace: 500 W falling to 250 W over the first 90 s, then flat.
+  const textbook = Array.from({ length: 180 }, (_, t) => (t < 90 ? 500 - (250 * t) / 90 : 250));
+
+  it('takes CP from the final 30 s and W-prime from the work above it', () => {
+    const r = cpFromAllOut(textbook, 240)!;
     expect(r.cpW).toBeCloseTo(250, 6);
     expect(r.wPrimeJ).toBeCloseTo((r.meanPowerW - 250) * 180, 3);
     expect(r.wPrimeJ).toBeGreaterThan(10_000);
-    expect(r.paced).toBe(false);
+    expect(r.peakAtS).toBe(15);
+    expect(r.problem).toBeNull();
   });
 
-  it('flags a paced effort and rejects poor coverage', () => {
-    const paced = cpFromAllOut(Array(180).fill(280))!;
-    expect(paced.paced).toBe(true);
+  it('rejects an effort that stopped before the clock did', () => {
+    // 2026-10-14 ride: ~385 W rising for 143 s, then ~100 W (the rider eased
+    // off to the cooldown target). The old code reported CP = 102 W.
+    const power = Array.from({ length: 180 }, (_, t) => (t < 143 ? 320 + (100 * t) / 143 : 100));
+    const r = cpFromAllOut(power, 235)!;
+    expect(r.cpW).toBeCloseTo(100, 6);
+    expect(r.problem).toBe('stopped-early');
+  });
+
+  it('rejects a paced start (late peak) and a paced effort (flat)', () => {
+    const ramped = Array.from({ length: 180 }, (_, t) => 300 + t * 0.5); // peaks at the end
+    expect(cpFromAllOut(ramped, 300)!.problem).toBe('late-peak');
+    expect(cpFromAllOut(Array(180).fill(280), 280)!.problem).toBe('paced');
+  });
+
+  it('rejects a result far from the FTP in use, but only when an FTP is known', () => {
+    const low = textbook.map((p) => p / 2); // CP 125 W
+    expect(cpFromAllOut(low, 235)!.problem).toBe('implausible');
+    expect(cpFromAllOut(low, null)!.problem).toBeNull();
+  });
+
+  it('rejects poor coverage and reports nothing without any power', () => {
     const gaps = Array(180).fill(300) as (number | null)[];
     for (let i = 0; i < 20; i++) gaps[i * 5] = null;
-    expect(cpFromAllOut(gaps)).toBeNull();
+    expect(cpFromAllOut(gaps)!.problem).toBe('gaps');
+    expect(cpFromAllOut(Array(180).fill(null))).toBeNull();
   });
 
   it('time to exhaustion follows the CP/W-prime model', () => {
     expect(timeToExhaustionS(300, 250, 15_000)).toBe(300);
     expect(timeToExhaustionS(240, 250, 15_000)).toBeNull();
+  });
+});
+
+describe('HR max across rides', () => {
+  it('takes the highest peak of any ride in the last year and names the ride', () => {
+    const rides = [
+      { date: '2026-10-06T13:58:29Z', recordingId: 'ramp', maxHrBpm: 181 },
+      { date: '2026-10-14T13:16:29Z', recordingId: 'allout', maxHrBpm: 185 },
+      { date: '2026-10-15T10:00:00Z', recordingId: 'easy', maxHrBpm: 118 },
+      { date: '2026-10-12T10:00:00Z', recordingId: 'nostrap', maxHrBpm: null },
+      { date: '2025-06-01T10:00:00Z', recordingId: 'old', maxHrBpm: 190 }, // too old
+    ];
+    const h = hrMaxProfile(rides, '2026-10-15')!;
+    expect(h.bpm).toBe(185);
+    expect(h.recordingId).toBe('allout');
+    expect(hrMaxProfile([rides[3]], '2026-10-15')).toBeNull();
   });
 });
 

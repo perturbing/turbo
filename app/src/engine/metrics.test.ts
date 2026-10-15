@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ResolvedPlan, RideRecording, RideSample } from '../data/schema';
-import { computeRideMetrics, normalizedPower, plannedTss, trainingStress } from './metrics';
+import { computeRideMetrics, normalizedPower, peakHeartRate, plannedTss, trainingStress } from './metrics';
+import { CP_TEST_RECIPE_ID } from '../data/builtinWorkouts';
 
 function recording(over: Partial<RideRecording> = {}): RideRecording {
   return {
@@ -126,5 +127,47 @@ describe('plannedTss', () => {
     expect(plannedTss(plan, 200)).toBeCloseTo(100, 6);
     const easy: ResolvedPlan = { totalS: 2700, steps: [{ startS: 0, endS: 2700, kind: 'steady', targetW: 120 }] };
     expect(plannedTss(easy, 200)).toBeCloseTo(27, 6);
+  });
+});
+
+describe('peak heart rate', () => {
+  it('ignores a single strap spike and gaps', () => {
+    const s = samples(60, (t) => ({ hrBpm: t === 30 ? 240 : 150 + (t > 40 ? 10 : 0) }));
+    expect(peakHeartRate(s)).toBe(160);
+    expect(peakHeartRate(samples(60, () => ({ hrBpm: null })))).toBeNull();
+    expect(peakHeartRate(samples(3, () => ({ hrBpm: 150 })))).toBeNull(); // too short for a window
+  });
+
+  it('is part of ride metrics', () => {
+    const m = computeRideMetrics(recording(), samples(120, (t) => ({ powerW: 150, hrBpm: 120 + Math.floor(t / 10) })), 200);
+    expect(m.maxHrBpm).toBe(131);
+  });
+});
+
+describe('all-out test detection', () => {
+  const plan: ResolvedPlan = {
+    totalS: 240,
+    steps: [
+      { startS: 0, endS: 30, kind: 'recovery', targetW: 100, label: 'Settle' },
+      { startS: 30, endS: 210, kind: 'steady', targetW: 300, label: 'ALL OUT', allOut: true },
+      { startS: 210, endS: 240, kind: 'recovery', targetW: 100, label: 'Cooldown' },
+    ],
+  };
+  const trace = (t: number) => (t < 90 ? 500 - (250 * t) / 90 : 250);
+
+  it('finds the flagged step and analyses only its 180 s', () => {
+    const rec = recording({ recipeId: CP_TEST_RECIPE_ID, mode: 'shift', resolvedPlan: plan });
+    const s = samples(240, (t) => ({ powerW: t <= 30 || t > 210 ? 100 : trace(t - 31) }));
+    const m = computeRideMetrics(rec, s, 240);
+    expect(m.cpTest).not.toBeNull();
+    expect(m.cpTest!.cpW).toBeCloseTo(250, 6);
+    expect(m.cpTest!.problem).toBeNull();
+  });
+
+  it('still finds the step by label in rides recorded before the flag existed', () => {
+    const legacy: ResolvedPlan = { ...plan, steps: plan.steps.map(({ allOut: _a, ...s }) => ({ ...s, label: s.label === 'ALL OUT' ? 'ALL OUT — no pacing' : s.label })) };
+    const rec = recording({ recipeId: CP_TEST_RECIPE_ID, mode: 'shift', resolvedPlan: legacy });
+    const s = samples(240, (t) => ({ powerW: t <= 30 || t > 210 ? 100 : trace(t - 31) }));
+    expect(computeRideMetrics(rec, s, 240).cpTest?.cpW).toBeCloseTo(250, 6);
   });
 });

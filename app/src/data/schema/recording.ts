@@ -11,6 +11,8 @@ export const ResolvedStep = z.object({
   targetEndW: z.number().min(0).optional(), // present for ramps
   cadence: z.object({ minRpm: z.number(), maxRpm: z.number() }).optional(),
   label: z.string().optional(),
+  // Maximal effort: no target is shown while riding it (see SteadyBlock).
+  allOut: z.boolean().optional(),
 });
 export type ResolvedStep = z.infer<typeof ResolvedStep>;
 

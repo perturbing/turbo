@@ -15,6 +15,7 @@ export const BUILTIN_WORKOUTS: WorkoutRecipe[] = [
   {
     ...base,
     id: CP_TEST_RECIPE_ID,
+    revision: 2,
     name: '3-minute all-out test (Shift mode)',
     category: 'test',
     defaultMode: 'shift',
@@ -22,7 +23,11 @@ export const BUILTIN_WORKOUTS: WorkoutRecipe[] = [
       { kind: 'ramp', label: 'Warm-up', durationS: 600, startTarget: { basis: 'ftpPct', pct: 45 }, endTarget: { basis: 'ftpPct', pct: 65 } },
       { kind: 'steady', label: 'Opener', durationS: 20, target: { basis: 'ftpPct', pct: 120 }, cadence: { minRpm: 95, maxRpm: 110 } },
       { kind: 'recovery', label: 'Settle', durationS: 220, target: { basis: 'ftpPct', pct: 50 } },
-      { kind: 'steady', label: 'ALL OUT — no pacing', durationS: 180, target: { basis: 'ftpPct', pct: 150 }, cadence: { minRpm: 90, maxRpm: 110 } },
+      // The target is only the chart height and load estimate: the step is
+      // flagged allOut, so the ride screen shows no number and no cadence band
+      // during it. Revision 2: the first version showed 150% FTP as a target,
+      // which turned the test into a paced interval (2026-10-14 ride).
+      { kind: 'steady', label: 'ALL OUT', durationS: 180, target: { basis: 'ftpPct', pct: 150 }, allOut: true },
       { kind: 'recovery', label: 'Cooldown', durationS: 600, target: { basis: 'ftpPct', pct: 45 } },
     ],
   },
@@ -123,13 +128,15 @@ export const BUILTIN_WORKOUTS: WorkoutRecipe[] = [
   },
 ];
 
-// Seed on first launch; existing (possibly user-modified) entries are kept.
+// Seed on first launch. Builtins cannot be edited in the app, so a stored
+// copy whose revision is behind the shipped one is replaced (a user's own
+// recipes, and imported copies, are never touched: they have another source).
 export async function seedBuiltinWorkouts(): Promise<void> {
   const db = await getDb();
   const tx = db.transaction('recipes', 'readwrite');
   for (const recipe of BUILTIN_WORKOUTS) {
-    const existing = await tx.store.get(recipe.id);
-    if (!existing) await tx.store.put(recipe);
+    const existing = (await tx.store.get(recipe.id)) as WorkoutRecipe | undefined;
+    if (!existing || (existing.source === 'builtin' && existing.revision < recipe.revision)) await tx.store.put(recipe);
   }
   await tx.done;
 }

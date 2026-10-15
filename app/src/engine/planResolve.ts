@@ -60,6 +60,7 @@ export function resolvePlan(recipe: WorkoutRecipe, ftpW: number | null): Resolve
         targetW: resolveTarget(block.target, ftpW),
         cadence: block.cadence,
         label,
+        ...(block.kind === 'steady' && block.allOut ? { allOut: true } : {}),
       });
     }
     t += block.durationS;

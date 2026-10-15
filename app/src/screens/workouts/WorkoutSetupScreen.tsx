@@ -82,6 +82,14 @@ export function WorkoutSetupScreen() {
         </div>
       </div>
 
+      {recipe.blocks.some((b) => b.kind === 'steady' && b.allOut) ? (
+        <div className="banner">
+          <strong>This workout has an all-out step.</strong> During it the ride screen shows no target and no upcoming
+          step. Sprint from the first pedal stroke as if the effort were ten seconds long, then keep fighting to turn the
+          pedals as the power falls. Do not hold a number, do not start steady and do not ease off before the clock stops;
+          the analysis rejects a test ridden that way. Pick a gear you can still turn at the end.
+        </div>
+      ) : null}
       {plan ? (
         <PowerProfileChart plan={plan} ftpW={ftp} height={90} />
       ) : (
@@ -117,12 +125,14 @@ export function WorkoutSetupScreen() {
                   <td>{s.label ?? s.kind}</td>
                   <td className="num">{formatDuration(s.endS - s.startS)}</td>
                   <td className="num">
-                    {ftp
-                      ? `${Math.round((s.targetW / ftp) * 100)}%${s.targetEndW !== undefined ? `→${Math.round(((s.targetEndW ?? 0) / ftp) * 100)}%` : ''}`
-                      : `${s.targetW}%${s.targetEndW !== undefined ? `→${s.targetEndW}%` : ''}`}
+                    {s.allOut
+                      ? 'all out'
+                      : ftp
+                        ? `${Math.round((s.targetW / ftp) * 100)}%${s.targetEndW !== undefined ? `→${Math.round(((s.targetEndW ?? 0) / ftp) * 100)}%` : ''}`
+                        : `${s.targetW}%${s.targetEndW !== undefined ? `→${s.targetEndW}%` : ''}`}
                   </td>
                   <td className="num">
-                    {plan ? `${s.targetW}${s.targetEndW !== undefined ? `→${s.targetEndW}` : ''} W` : '—'}
+                    {s.allOut ? 'no target' : plan ? `${s.targetW}${s.targetEndW !== undefined ? `→${s.targetEndW}` : ''} W` : '—'}
                   </td>
                   <td className="num">{s.cadence ? `${s.cadence.minRpm}–${s.cadence.maxRpm}` : 'free'}</td>
                 </tr>

@@ -9,7 +9,9 @@ import { loadSamples } from '../../data/repositories/recordings';
 import { metricsForAll } from '../../data/repositories/rideMetrics';
 import type { RideMetrics } from '../../engine/metrics';
 import {
+  CP_TEST_PROBLEM_TEXT,
   freshness,
+  hrMaxProfile,
   PHYSIOLOGY,
   rampHrMarkers,
   thresholdProfile,
@@ -73,6 +75,8 @@ export function PhysiologyPanel() {
     );
   }, [metrics, today]);
 
+  // Latest all-out test, usable or not: a rejected test is shown with its
+  // reason rather than silently falling back to an older one.
   const cp = useMemo(() => {
     if (!metrics) return null;
     const tests = recordings
@@ -81,6 +85,17 @@ export function PhysiologyPanel() {
     const latest = tests[0];
     if (!latest) return null;
     return { result: metrics.get(latest.id)!.cpTest as CpTestResult, date: latest.startedAt, recordingId: latest.id, fresh: freshness(latest.startedAt, PHYSIOLOGY.cpMaxAgeDays, today) };
+  }, [metrics, recordings, today]);
+  const cpUsable = cp && cp.fresh === 'fresh' && cp.result.problem === null ? cp : null;
+
+  // HR max is the highest peak of any ride with a strap, not just the ramp.
+  const hrMax = useMemo(() => {
+    if (!metrics) return null;
+    const byId = new Map(recordings.map((r) => [r.id, r]));
+    return hrMaxProfile(
+      [...metrics.values()].map((m) => ({ date: byId.get(m.recordingId)?.startedAt ?? m.date, recordingId: m.recordingId, maxHrBpm: m.maxHrBpm })),
+      today,
+    );
   }, [metrics, recordings, today]);
 
   const ridesWithRr = metrics ? [...metrics.values()].filter((m) => m.thresholds).length : 0;
@@ -97,7 +112,7 @@ export function PhysiologyPanel() {
 
   const ftp = settings.currentFtpW;
   const lt2 = thresholds?.lt2W?.median ?? null;
-  const cpW = cp && cp.fresh === 'fresh' ? cp.result.cpW : null;
+  const cpW = cpUsable ? cpUsable.result.cpW : null;
   const agreement = [ftp, lt2, cpW].filter((v): v is number => v !== null);
   const spreadPct = agreement.length >= 2 ? ((Math.max(...agreement) - Math.min(...agreement)) / Math.min(...agreement)) * 100 : null;
 
@@ -140,17 +155,19 @@ export function PhysiologyPanel() {
           <div className="label">
             HR max <Explain term="hrmax" />
           </div>
-          {ramp && rampFresh === 'fresh' && rampHr?.hrMaxBpm ? (
+          {hrMax ? (
             <>
               <div className="value">
-                {rampHr.hrMaxBpm} <span className="unit">bpm</span>
+                {hrMax.bpm} <span className="unit">bpm</span>
               </div>
-              <div className="unit">ramp {fmtDate(ramp.date)}</div>
+              <div className="unit">
+                {fmtDate(hrMax.date)} · <Link to={`/data/${hrMax.recordingId}`}>ride</Link>
+              </div>
             </>
           ) : (
             <>
-              <div className="value placeholder">No recent measurement</div>
-              <div className="unit">{ramp && rampFresh === 'fresh' ? 'ramp ridden without heart rate' : 'needs a ramp test with a strap'}</div>
+              <div className="value placeholder">No measurement</div>
+              <div className="unit">needs a hard ride with a strap in the last year</div>
             </>
           )}
         </div>
@@ -193,16 +210,22 @@ export function PhysiologyPanel() {
           <div className="label">
             Critical power <Explain term="cp" /> and W′ <Explain term="wprime" />
           </div>
-          {cp && cp.fresh === 'fresh' ? (
+          {cpUsable ? (
             <>
               <div className="value">
-                {Math.round(cp.result.cpW)} <span className="unit">W</span>
+                {Math.round(cpUsable.result.cpW)} <span className="unit">W</span>
                 <span className="unit"> · </span>
-                {(cp.result.wPrimeJ / 1000).toFixed(1)} <span className="unit">kJ</span>
+                {(cpUsable.result.wPrimeJ / 1000).toFixed(1)} <span className="unit">kJ</span>
               </div>
               <div className="unit">
-                {cp.result.paced ? 'PACED START: estimate unreliable, repeat the test · ' : ''}
-                test {fmtDate(cp.date)} · <Link to={`/data/${cp.recordingId}`}>recording</Link>
+                test {fmtDate(cpUsable.date)} · <Link to={`/data/${cpUsable.recordingId}`}>recording</Link>
+              </div>
+            </>
+          ) : cp && cp.fresh === 'fresh' && cp.result.problem ? (
+            <>
+              <div className="value placeholder">Test not usable</div>
+              <div className="unit">
+                {fmtDate(cp.date)}: {CP_TEST_PROBLEM_TEXT[cp.result.problem]}. Repeat the test. <Link to={`/data/${cp.recordingId}`}>recording</Link>
               </div>
             </>
           ) : (
@@ -214,13 +237,14 @@ export function PhysiologyPanel() {
         </div>
       </div>
 
-      {cp && cp.fresh === 'fresh' && !cp.result.paced ? (
+      {cpUsable ? (
         <p className="muted small">
           Above critical power your time is W′ divided by the surplus:{' '}
           {[25, 50, 100]
             .map((d) => {
-              const t = timeToExhaustionS(cp.result.cpW + d, cp.result.cpW, cp.result.wPrimeJ)!;
-              return `${Math.round(cp.result.cpW + d)} W for ${t >= 60 ? `${Math.floor(t / 60)} min ${Math.round(t % 60)} s` : `${Math.round(t)} s`}`;
+              const { cpW: c, wPrimeJ } = cpUsable.result;
+              const t = timeToExhaustionS(c + d, c, wPrimeJ)!;
+              return `${Math.round(c + d)} W for ${t >= 60 ? `${Math.floor(t / 60)} min ${Math.round(t % 60)} s` : `${Math.round(t)} s`}`;
             })
             .join(' · ')}
           . Below it you can, in principle, keep going.
@@ -266,8 +290,10 @@ export function PhysiologyPanel() {
       <p className="muted small">
         Thresholds come from heart-rate variability during ordinary rides (any ride with a chest strap counts; {ridesWithRr} so
         far, pooled over the last {PHYSIOLOGY.thresholdWindowDays} days, at least {PHYSIOLOGY.thresholdMinRides} needed). The
-        all-out test is ridden in Shift mode: warm up, then go as hard as you can from the first second and hold nothing back
-        for three minutes. Pacing it, even a little, breaks the estimate.
+        all-out test is ridden in Shift mode. During the three minutes the screen shows no target: sprint from the first
+        pedal stroke as if the effort were ten seconds long, then keep fighting to turn the pedals as the power falls. A
+        correct trace starts well above 500 W and settles near your FTP; what is left in the final 30 seconds is your
+        critical power. Holding a number, starting steady or easing off before the clock stops all make the app reject the test.
       </p>
     </div>
   );

@@ -78,7 +78,7 @@ export function ProgressSection({
       label: 'CP (3-min test)',
       color: TREND_COLORS[3],
       points: completed
-        .filter((r) => r.recipeId === CP_TEST_RECIPE_ID && metrics.get(r.id)!.cpTest && !metrics.get(r.id)!.cpTest!.paced)
+        .filter((r) => r.recipeId === CP_TEST_RECIPE_ID && metrics.get(r.id)!.cpTest && metrics.get(r.id)!.cpTest!.problem === null)
         .map((r) => ({ date: metrics.get(r.id)!.date, value: metrics.get(r.id)!.cpTest!.cpW })),
     };
 

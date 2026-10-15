@@ -16,13 +16,25 @@ export const PHYSIOLOGY = {
   vo2maxSlope: 0.01141,
   vo2maxIntercept: 0.435,
   vo2maxErrorPct: 7,
+  // Highest heart rate seen in any ride. It falls slowly with age, so a year
+  // is a fair window; the tile says how old the observation is.
+  hrMaxMaxAgeDays: 365,
   // 3-minute all-out test (Vanhatalo et al., 2007): CP = mean power of the
   // final 30 s, W' = work done above CP over the 180 s.
   allOutDurationS: 180,
   allOutEndWindowS: 30,
+  minAllOutCoverage: 0.95,
   // An all-out start that is not much above the end was paced.
   pacedIfEndOverStart: 0.85,
-  minAllOutCoverage: 0.95,
+  // A true all-out effort peaks in its first seconds; a peak (15 s mean) this
+  // late means the rider was holding back.
+  pacedIfPeakAfterS: 45,
+  // Power settles to a plateau in the last minute. A final 30 s far below the
+  // minute before it is a rider who stopped, not one who faded.
+  stoppedIfEndOverPrevMinute: 0.7,
+  // CP and FTP estimate the same boundary; a result this far from the FTP in
+  // use came from a test that was not ridden as intended.
+  cpPlausibleOfFtp: [0.6, 1.4] as const,
 } as const;
 
 export type Freshness = 'fresh' | 'stale';
@@ -85,40 +97,103 @@ export function rampHrMarkers(samples: RideSample[], ftpEstimateW: number): Ramp
   return { hrMaxBpm, lthrBpm };
 }
 
+// Why an all-out test cannot be used, in order of precedence.
+export type CpTestProblem = 'gaps' | 'stopped-early' | 'late-peak' | 'paced' | 'implausible';
+
+export const CP_TEST_PROBLEM_TEXT: Record<CpTestProblem, string> = {
+  gaps: 'the trainer dropped too much power data during the effort',
+  'stopped-early': 'the effort stopped before the three minutes were up: the final 30 s were far below the minute before them',
+  'late-peak': 'the peak came late, so the start was paced: go all out from the first pedal stroke',
+  paced: 'the final 30 s were nearly as hard as the first 30 s, which means the start was paced',
+  implausible: 'the result is too far from your FTP to be a real critical power',
+};
+
 export interface CpTestResult {
-  method: 'all-out-3min-v1';
+  method: 'all-out-3min-v2';
   cpW: number;
   wPrimeJ: number;
   meanPowerW: number;
   startPowerW: number; // first 30 s
-  paced: boolean;
+  endPowerW: number; // last 30 s (= cpW)
+  peakPowerW: number; // best 15 s mean
+  peakAtS: number; // when that 15 s window ended, from the start of the step
   coverage: number; // share of the 180 s with a power reading
+  // null when the test is usable. Otherwise the numbers above describe the
+  // ride but must not be shown as a measurement.
+  problem: CpTestProblem | null;
 }
 
 // Power samples of the all-out step, in order, one per second (nulls = gaps).
-export function cpFromAllOut(power: (number | null)[]): CpTestResult | null {
+// `ftpW` is the FTP in use, for the plausibility check (skipped when null).
+export function cpFromAllOut(power: (number | null)[], ftpW: number | null = null): CpTestResult | null {
   const dur = PHYSIOLOGY.allOutDurationS;
-  const have = power.slice(0, dur).filter((p): p is number => p !== null);
+  const win = PHYSIOLOGY.allOutEndWindowS;
+  const step = power.slice(0, dur);
+  const have = step.filter((p): p is number => p !== null);
+  if (!have.length) return null;
   const coverage = have.length / dur;
-  if (coverage < PHYSIOLOGY.minAllOutCoverage) return null;
   const mean = (xs: (number | null)[]) => {
     const v = xs.filter((p): p is number => p !== null);
-    return v.reduce((a, b) => a + b, 0) / v.length;
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
   };
-  const end = power.slice(dur - PHYSIOLOGY.allOutEndWindowS, dur);
-  const start = power.slice(0, PHYSIOLOGY.allOutEndWindowS);
-  const cpW = mean(end);
-  const meanPowerW = mean(power.slice(0, dur));
-  const startPowerW = mean(start);
+  const cpW = mean(step.slice(dur - win, dur));
+  const meanPowerW = mean(step);
+  const startPowerW = mean(step.slice(0, win));
+  const prevMinuteW = mean(step.slice(dur - win - 60, dur - win));
+
+  let peakPowerW = 0;
+  let peakAtS = 0;
+  for (let end = 15; end <= step.length; end++) {
+    const m = mean(step.slice(end - 15, end));
+    if (m > peakPowerW) {
+      peakPowerW = m;
+      peakAtS = end;
+    }
+  }
+
+  let problem: CpTestProblem | null = null;
+  if (coverage < PHYSIOLOGY.minAllOutCoverage) problem = 'gaps';
+  else if (cpW < prevMinuteW * PHYSIOLOGY.stoppedIfEndOverPrevMinute) problem = 'stopped-early';
+  else if (peakAtS > PHYSIOLOGY.pacedIfPeakAfterS) problem = 'late-peak';
+  else if (cpW / startPowerW > PHYSIOLOGY.pacedIfEndOverStart) problem = 'paced';
+  else if (ftpW && (cpW < ftpW * PHYSIOLOGY.cpPlausibleOfFtp[0] || cpW > ftpW * PHYSIOLOGY.cpPlausibleOfFtp[1])) problem = 'implausible';
+
   return {
-    method: 'all-out-3min-v1',
+    method: 'all-out-3min-v2',
     cpW,
     wPrimeJ: Math.max(0, (meanPowerW - cpW) * dur),
     meanPowerW,
     startPowerW,
-    paced: cpW / startPowerW > PHYSIOLOGY.pacedIfEndOverStart,
+    endPowerW: cpW,
+    peakPowerW,
+    peakAtS,
     coverage,
+    problem,
   };
+}
+
+// The highest heart rate seen in any ride within the window: a maximum is
+// only reached in a maximal effort, so the ride that produced it is named.
+export interface HrMaxObservation {
+  bpm: number;
+  date: string; // ISO timestamp of the ride
+  recordingId: string;
+  fresh: Freshness;
+}
+
+export function hrMaxProfile(
+  rides: { date: string; recordingId: string; maxHrBpm: number | null }[],
+  today: string,
+): HrMaxObservation | null {
+  let best: HrMaxObservation | null = null;
+  for (const r of rides) {
+    if (r.maxHrBpm === null) continue;
+    if (freshness(r.date, PHYSIOLOGY.hrMaxMaxAgeDays, today) !== 'fresh') continue;
+    if (!best || r.maxHrBpm > best.bpm || (r.maxHrBpm === best.bpm && r.date > best.date)) {
+      best = { bpm: r.maxHrBpm, date: r.date, recordingId: r.recordingId, fresh: 'fresh' };
+    }
+  }
+  return best;
 }
 
 // Time to exhaustion at a power above CP, from the CP/W' model.

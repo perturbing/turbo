@@ -29,6 +29,10 @@ export const SteadyBlock = z.object({
   kind: z.literal('steady'),
   ...blockBase,
   target: PowerTarget,
+  // A maximal effort: the rider goes as hard as they can for the whole step
+  // and lets power fall as they tire. The target only sizes the step in charts
+  // and load estimates; the ride screen shows no number during it.
+  allOut: z.boolean().optional(),
 });
 
 export const RecoveryBlock = z.object({

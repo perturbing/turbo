@@ -7,7 +7,7 @@ const TODAY = '2026-11-15';
 
 function metrics(over: Partial<RideMetrics>): RideMetrics {
   return {
-    version: 'metrics-v2',
+    version: 'metrics-v3',
     recordingId: 'x',
     date: TODAY,
     ftpUsed: 200,
@@ -17,6 +17,7 @@ function metrics(over: Partial<RideMetrics>): RideMetrics {
     intensityFactor: 0.72,
     tss: 52,
     avgHrBpm: 135,
+    maxHrBpm: 158,
     efficiencyFactor: 1.07,
     decouplingPct: 3,
     compliancePct: 95,

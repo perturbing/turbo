@@ -140,10 +140,10 @@ export const GLOSSARY: Record<MetricKey, MetricExplanation> = {
   },
   hrmax: {
     name: 'Maximum heart rate (observed)',
-    short: 'The highest heart rate seen in your last ramp test.',
-    how: 'Simply the peak heart rate recorded while you rode the ramp to failure.',
-    read: 'Yours, not a formula. It only changes meaningfully with age. Use it to set heart-rate zones if you ride outdoors without power.',
-    caveat: 'A ramp stopped early, a hot room or a bad night can leave it a few beats under the true value. Higher values seen later replace it.',
+    short: 'The highest heart rate seen in any ride in the last year.',
+    how: 'Every ride with a chest strap is scanned for its peak heart rate, taken as the highest 5-second median so a single bad strap reading cannot set it. The highest peak across rides in the last year is shown, with the ride it came from.',
+    read: 'Yours, not a formula. Peaks are only reached in maximal efforts (a ramp test, an all-out test, the end of a hard interval), so the number tends to come from one of those. It only changes meaningfully with age. Use it to set heart-rate zones if you ride outdoors without power.',
+    caveat: 'A hot room, a bad night or an effort stopped early can leave it a few beats under the true value. A higher value seen later replaces it automatically.',
     source: 'Direct observation.',
   },
   lthr: {
@@ -181,9 +181,9 @@ export const GLOSSARY: Record<MetricKey, MetricExplanation> = {
   cp: {
     name: 'Critical power (CP)',
     short: 'The highest power you can hold in a steady state: the hinge of your power-duration curve.',
-    how: 'From the 3-minute all-out test: the mean power of the final 30 seconds, after the reserve above it has been exhausted. Must be ridden in Shift mode, all out from the first pedal stroke.',
+    how: 'From the 3-minute all-out test: the mean power of the final 30 seconds, after the reserve above it has been exhausted. Must be ridden in Shift mode, all out from the first pedal stroke, with no target on screen: sprint, then keep fighting as the power falls.',
     read: 'Close to FTP and LT2 for most riders. Efforts below CP can last a long time; above it, your time is set by W′ divided by how far above CP you are.',
-    caveat: 'A paced start (not going all out immediately) inflates CP and hides W′. The app flags a test whose final 30 seconds are more than 85% of the first 30 seconds as paced.',
+    caveat: 'Only a genuinely all-out effort gives a usable number. The app rejects a test, and says why, when the power peaks later than 45 seconds in (paced start), when the final 30 seconds are more than 85% of the first 30 seconds (paced throughout), when the final 30 seconds fall below 70% of the minute before them (stopped early), or when the result is far from your FTP.',
     source: 'Vanhatalo, Doust & Burnley, 2007.',
   },
   wprime: {

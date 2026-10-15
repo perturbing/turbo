@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { resetDbForTests } from './db';
 import { seedBuiltinWorkouts, BUILTIN_WORKOUTS } from './builtinWorkouts';
-import { listRecipes } from './repositories/recipes';
+import { listRecipes, saveRecipe } from './repositories/recipes';
 import { saveRecording, saveSampleChunk, loadSamples, listRecordings } from './repositories/recordings';
 import { saveFtpObservation, listFtpObservations } from './repositories/ftpHistory';
 import { savePlan, listPlans } from './repositories/plans';
@@ -93,6 +93,16 @@ describe('export -> import round-trip into a clean installation', () => {
     await seedBuiltinWorkouts();
     const recipes = await listRecipes();
     expect(recipes).toHaveLength(BUILTIN_WORKOUTS.length);
+  });
+
+  it('replaces a stored builtin whose revision is behind the shipped one', async () => {
+    const shipped = BUILTIN_WORKOUTS.find((r) => r.revision > 1)!;
+    const stale = { ...shipped, revision: 1, name: 'old copy' };
+    await saveRecipe(stale);
+    await seedBuiltinWorkouts();
+    const recipes = await listRecipes();
+    expect(recipes.find((r) => r.id === shipped.id)?.name).toBe(shipped.name);
+    expect(recipes.find((r) => r.id === shipped.id)?.revision).toBe(shipped.revision);
   });
 
   it('round-trips every record type without loss', async () => {
@@ -197,7 +207,7 @@ describe('export -> import round-trip into a clean installation', () => {
     await populate();
     const envelope = await exportAll();
     const recipeRecord = envelope.records.recipes[0] as { revision: number; id: string };
-    recipeRecord.revision = 2;
+    recipeRecord.revision += 1;
     const preview = await previewImport(JSON.stringify(envelope));
     const conflicted = preview.recipes.find((r) => r.record.id === recipeRecord.id);
     expect(conflicted?.action).toBe('copy');

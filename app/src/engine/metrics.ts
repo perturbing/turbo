@@ -9,7 +9,7 @@ import { CP_TEST_RECIPE_ID } from '../data/builtinWorkouts';
 // here is pure. Definitions follow Coggan (NP, IF, TSS) and Friel (EF,
 // decoupling); the in-app glossary (ui/glossary.ts) explains each one.
 
-export const METRICS_VERSION = 'metrics-v2';
+export const METRICS_VERSION = 'metrics-v3';
 
 export interface RideMetrics {
   version: typeof METRICS_VERSION;
@@ -23,6 +23,9 @@ export interface RideMetrics {
   intensityFactor: number | null;
   tss: number | null;
   avgHrBpm: number | null;
+  // Peak heart rate, as the highest 5 s median so a single strap spike cannot
+  // set it. Feeds the HR max shown under Physiology.
+  maxHrBpm: number | null;
   // Normalized power / average heart rate. Rises as aerobic fitness improves.
   efficiencyFactor: number | null;
   // Power:HR drift between the halves of the longest steady block (>= 20 min).
@@ -42,6 +45,25 @@ const NP_WINDOW_S = 30;
 const DECOUPLING_MIN_BLOCK_S = 20 * 60;
 const DECOUPLING_SETTLE_S = 180;
 const COMPLIANCE_SETTLE_S = 15;
+const HR_PEAK_WINDOW_S = 5;
+
+// Highest median of HR_PEAK_WINDOW_S consecutive readings (gaps break a window).
+export function peakHeartRate(samples: RideSample[]): number | null {
+  let best: number | null = null;
+  const run: number[] = [];
+  for (const s of samples) {
+    if (s.hrBpm === null) {
+      run.length = 0;
+      continue;
+    }
+    run.push(s.hrBpm);
+    if (run.length > HR_PEAK_WINDOW_S) run.shift();
+    if (run.length < HR_PEAK_WINDOW_S) continue;
+    const med = [...run].sort((a, b) => a - b)[Math.floor(HR_PEAK_WINDOW_S / 2)];
+    if (best === null || med > best) best = med;
+  }
+  return best;
+}
 
 export function localDate(iso: string): string {
   const d = new Date(iso);
@@ -164,7 +186,8 @@ export function computeRideMetrics(
 
   let cpTest: CpTestResult | null = null;
   if (recording.recipeId === CP_TEST_RECIPE_ID && plan) {
-    const allOut = plan.steps.find((s) => s.label?.startsWith('ALL OUT'));
+    // Rides recorded before the allOut flag existed carry only the label.
+    const allOut = plan.steps.find((s) => s.allOut || s.label?.startsWith('ALL OUT'));
     if (allOut) {
       const power: (number | null)[] = [];
       let last = -1;
@@ -177,7 +200,7 @@ export function computeRideMetrics(
         power.push(s.powerW);
         last = sec;
       });
-      cpTest = cpFromAllOut(power);
+      cpTest = cpFromAllOut(power, ftp);
     }
   }
 
@@ -192,6 +215,7 @@ export function computeRideMetrics(
     intensityFactor,
     tss,
     avgHrBpm,
+    maxHrBpm: peakHeartRate(samples),
     efficiencyFactor,
     decouplingPct: plan ? decoupling(plan, samples, timeline) : null,
     compliancePct: isErgWorkout ? compliance(plan, samples, timeline) : null,

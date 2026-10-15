@@ -74,13 +74,19 @@ export function LiveRideScreen() {
 
       <div className="ride-metrics">
         <MetricTile label="Power" value={s.live.powerW} unit="W" big state={s.live.powerW === null ? 'waiting' : 'value'} />
-        <MetricTile
-          label="Target"
-          value={s.targetW}
-          unit="W"
-          big
-          sub={s.currentStep?.label ?? (s.rampStage !== null ? (s.rampStage === 0 ? 'Warm-up' : `Stage ${s.rampStage}`) : undefined)}
-        />
+        {s.currentStep?.allOut ? (
+          // A maximal effort has no number to ride to: showing one turns it
+          // into a paced interval.
+          <MetricTile label="Target" text="ALL OUT" big sub="as hard as you can, let it fade" />
+        ) : (
+          <MetricTile
+            label="Target"
+            value={s.targetW}
+            unit="W"
+            big
+            sub={s.currentStep?.label ?? (s.rampStage !== null ? (s.rampStage === 0 ? 'Warm-up' : `Stage ${s.rampStage}`) : undefined)}
+          />
+        )}
         <MetricTile
           label="Cadence"
           value={s.live.cadenceRpm}
@@ -103,10 +109,10 @@ export function LiveRideScreen() {
         <div className="row">
           <MetricTile label="Elapsed" text={formatDuration(s.rideElapsedS)} />
           {remaining !== null ? <MetricTile label="Remaining" text={formatDuration(remaining)} /> : null}
-          {s.nextStep ? (
+          {s.nextStep && !s.currentStep?.allOut ? (
             <span className="muted small">
-              Next: {s.nextStep.label ?? s.nextStep.kind} · {s.nextStep.targetW}
-              {s.nextStep.targetEndW !== undefined ? `→${s.nextStep.targetEndW}` : ''} W in{' '}
+              Next: {s.nextStep.label ?? s.nextStep.kind} · {s.nextStep.allOut ? 'all out' : `${s.nextStep.targetW}`}
+              {s.nextStep.targetEndW !== undefined ? `→${s.nextStep.targetEndW}` : ''}{s.nextStep.allOut ? '' : ' W'} in{' '}
               {formatDuration(Math.max(0, (s.currentStep?.endS ?? 0) - s.planElapsedS))}
             </span>
           ) : null}
