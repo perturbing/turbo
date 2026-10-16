@@ -41,9 +41,13 @@ export function useReadiness(mode: RideMode, needsFtp: boolean): Readiness {
   if (mode === 'shift')
     items.push({
       label: 'Shifters',
-      ok: pods.some((p) => p.connection === 'connected'),
+      ok: pods.some((p) => p.connection === 'connected' && p.controlState === 'active'),
       optional: true,
-      detail: 'On-screen shifting is available as fallback',
+      detail: pods.some((p) => p.connection === 'connected' && p.controlState === 'locked')
+        ? 'Connected, but firmware-locked; unlock in Zwift. On-screen shifting remains available.'
+        : pods.some((p) => p.connection === 'connected' && p.controlState === 'stale')
+          ? 'Input stream stopped; held controls were released for safety.'
+        : 'On-screen shifting is available as fallback',
     });
   items.push({
     label: 'Heart rate',

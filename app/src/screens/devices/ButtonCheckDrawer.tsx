@@ -9,6 +9,12 @@ import { MockControlsPods } from '../../ble/mock/mockPods';
 export function ButtonCheckDrawer({ onClose }: { onClose: () => void }) {
   const [seen, setSeen] = useState<Set<RideButton>>(new Set());
   const [last, setLast] = useState<RideButton | null>(null);
+  const locked = useDeviceStore((s) =>
+    s.pods.some((pod) => pod.connection === 'connected' && pod.controlState === 'locked'),
+  );
+  const stale = useDeviceStore((s) =>
+    s.pods.some((pod) => pod.connection === 'connected' && pod.controlState === 'stale'),
+  );
   const pods = getPods();
 
   useEffect(() => {
@@ -34,6 +40,16 @@ export function ButtonCheckDrawer({ onClose }: { onClose: () => void }) {
         <p className="muted small">
           Press buttons on the pods — detected presses light up below. Nothing is sent to the trainer.
         </p>
+        {locked ? (
+          <div className="banner danger">
+            Pod controls are firmware-locked. Bluetooth is still connected, but button and lever events have stopped;
+            unlock the controls in Zwift. Any held input was released by the app.
+          </div>
+        ) : stale ? (
+          <div className="banner danger">
+            The input stream stopped while a control was held. The app released all held inputs for safety.
+          </div>
+        ) : null}
         <div className="row" style={{ flexWrap: 'wrap' }}>
           {RIDE_BUTTONS.map((b) => (
             <span

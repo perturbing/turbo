@@ -11,6 +11,7 @@ import {
 } from './ftmsControl';
 import {
   decodeRideBattery,
+  decodeRideLockState,
   decodeRideNotification,
   isRideOnAck,
   mergeAnalog,
@@ -147,6 +148,20 @@ describe('Zwift Ride decoding', () => {
 
   it('decodes battery message 19105f -> 95 %', () => {
     expect(decodeRideBattery(fromHex('19105f'))).toBe(95);
+  });
+
+  it('decodes firmware 1.3 unlocked and locked device-info states', () => {
+    expect(
+      decodeRideLockState(
+        fromHex('ff0500ea051e1000180f2008280930244212080110081a0c324343313138314338343639'),
+      ),
+    ).toBe('unlocked');
+    expect(
+      decodeRideLockState(
+        fromHex('ff0500ea051f100118840720082809302a4212080110081a0c324343313138314338343639'),
+      ),
+    ).toBe('locked');
+    expect(decodeRideLockState(fromHex('15'))).toBeNull();
   });
 
   it('merges analog across pods without flicker (owning pod wins per lever)', () => {

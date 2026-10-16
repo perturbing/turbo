@@ -16,6 +16,10 @@ export interface TelemetryUpdate {
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
+// A Ride pod can remain connected at the BLE/GATT layer while firmware 1.3+
+// locks its controls and suppresses controller-state notifications.
+export type PodControlState = 'unknown' | 'active' | 'locked' | 'stale';
+
 export type Unsubscribe = () => void;
 
 export interface TrainerCapabilities {
@@ -57,6 +61,7 @@ export interface PodState {
   id: string;
   name: string;
   connection: ConnectionState;
+  controlState: PodControlState;
   batteryPct: number | null;
 }
 

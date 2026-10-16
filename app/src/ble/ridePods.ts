@@ -1,6 +1,7 @@
 import * as U from './uuids';
 import {
   decodeRideBattery,
+  decodeRideLockState,
   decodeRideNotification,
   isRideOnAck,
   mergeAnalog,
@@ -17,8 +18,13 @@ interface Pod {
   // Latest lever readings from THIS pod, zeros made explicit (the wire format
   // omits zero-valued levers).
   analog: Record<string, number>;
+  inputTimer: ReturnType<typeof setTimeout> | null;
   intentionalDisconnect: boolean;
 }
+
+// A held button/lever is normally repeated every ~60-120 ms. If that stream
+// stops, retaining the last value is unsafe (most notably for the brake).
+export const RIDE_INPUT_STALE_MS = 750;
 
 // The Zwift Ride is two BLE peripherals (one per pod) and the left pod mirrors
 // the right pod's buttons, so each right-side press can arrive twice. Presses
@@ -75,22 +81,33 @@ export class BleControlsPods implements ControlsPods {
     if (!pod) {
       pod = {
         device,
-        state: { id: device.id, name: device.name ?? 'Zwift Ride', connection: 'connecting', batteryPct: null },
+        state: {
+          id: device.id,
+          name: device.name ?? 'Zwift Ride',
+          connection: 'connecting',
+          controlState: 'unknown',
+          batteryPct: null,
+        },
         pressed: new Set(),
         analog: {},
+        inputTimer: null,
         intentionalDisconnect: false,
       };
       this.podList.push(pod);
       device.addEventListener('gattserverdisconnected', () => this.onPodDisconnected(pod!));
     }
     pod.intentionalDisconnect = false;
+    this.clearPodInput(pod, true);
     pod.state.connection = 'connecting';
+    pod.state.controlState = 'unknown';
     this.emitPods();
     try {
       await this.setupPod(pod);
       pod.state.connection = 'connected';
     } catch (e) {
+      this.clearPodInput(pod, true);
       pod.state.connection = 'disconnected';
+      pod.state.controlState = 'unknown';
       this.emitPods();
       throw e;
     }
@@ -143,6 +160,7 @@ export class BleControlsPods implements ControlsPods {
     const type = data[0];
     if (type === RIDE_MSG.controllerState) {
       const state = decodeRideNotification(data);
+      this.setControlState(pod, 'active');
       pod.pressed = new Set(state.pressed);
       this.mergeAndEmit();
       // Zero-valued levers are omitted on the wire; make them explicit, then
@@ -151,14 +169,60 @@ export class BleControlsPods implements ControlsPods {
       pod.analog = { Lever_L: 0, Lever_R: 0, ...state.analog };
       const merged = mergeAnalog(this.podList.map((p) => p.analog));
       for (const cb of this.analogCbs) cb(merged);
+      this.armInputWatchdog(pod);
     } else if (type === RIDE_MSG.battery) {
       const pct = decodeRideBattery(data);
       if (pct !== null && pct !== pod.state.batteryPct) {
         pod.state.batteryPct = pct;
         this.emitPods();
       }
+    } else if (type === RIDE_MSG.deviceInfo) {
+      const lockState = decodeRideLockState(data);
+      if (lockState === 'locked') {
+        // GATT remains connected after the firmware locks, so explicitly
+        // release any cached button/lever state. This prevents a brake value
+        // from surviving indefinitely while only 0x15 heartbeats continue.
+        this.clearPodInput(pod, true);
+        this.setControlState(pod, 'locked');
+      } else if (lockState === 'unlocked') {
+        this.setControlState(pod, 'active');
+      }
     }
-    // 0x15 idle ticks, 0x2a handshake info and 0xff device info are ignored.
+    // 0x15 idle ticks and 0x2a handshake info are intentionally ignored.
+  }
+
+  private setControlState(pod: Pod, state: PodState['controlState']): void {
+    if (pod.state.controlState === state) return;
+    pod.state.controlState = state;
+    this.emitPods();
+  }
+
+  private armInputWatchdog(pod: Pod): void {
+    if (pod.inputTimer !== null) clearTimeout(pod.inputTimer);
+    pod.inputTimer = null;
+    const held =
+      pod.pressed.size > 0 || Object.values(pod.analog).some((value) => value !== 0);
+    if (!held) return;
+    pod.inputTimer = setTimeout(() => {
+      pod.inputTimer = null;
+      if (pod.state.controlState !== 'active') return;
+      this.clearPodInput(pod, true);
+      this.setControlState(pod, 'stale');
+    }, RIDE_INPUT_STALE_MS);
+  }
+
+  private clearPodInput(pod: Pod, forceAnalogEmit = false): void {
+    if (pod.inputTimer !== null) clearTimeout(pod.inputTimer);
+    pod.inputTimer = null;
+    const hadInput =
+      pod.pressed.size > 0 || Object.values(pod.analog).some((value) => value !== 0);
+    pod.pressed = new Set();
+    pod.analog = {};
+    this.mergeAndEmit();
+    if (hadInput || forceAnalogEmit) {
+      const merged = mergeAnalog(this.podList.map((p) => p.analog));
+      for (const cb of this.analogCbs) cb(merged);
+    }
   }
 
   private mergeAndEmit(): void {
@@ -173,10 +237,8 @@ export class BleControlsPods implements ControlsPods {
   }
 
   private onPodDisconnected(pod: Pod): void {
-    pod.pressed = new Set();
-    pod.analog = {};
-    this.mergeAndEmit();
-    for (const cb of this.analogCbs) cb(mergeAnalog(this.podList.map((p) => p.analog)));
+    this.clearPodInput(pod, true);
+    pod.state.controlState = 'unknown';
     if (pod.intentionalDisconnect) {
       pod.state.connection = 'disconnected';
       this.emitPods();
@@ -211,8 +273,10 @@ export class BleControlsPods implements ControlsPods {
   async disconnectAll(): Promise<void> {
     for (const pod of this.podList) {
       pod.intentionalDisconnect = true;
+      this.clearPodInput(pod, true);
       pod.device.gatt?.disconnect();
       pod.state.connection = 'disconnected';
+      pod.state.controlState = 'unknown';
     }
     this.emitPods();
   }

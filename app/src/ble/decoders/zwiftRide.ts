@@ -116,6 +116,32 @@ export interface RideControllerState {
   analog: Record<string, number>;
 }
 
+export type RideLockState = 'locked' | 'unlocked';
+
+// Firmware 1.3+ sends its control-lock state inside the 0xff device-info
+// envelope. The first three bytes are `ff 05 00`; the remaining protobuf has
+// field 93 containing {2: locked, 3: seconds}. Captures show 0/15 while
+// unlocked and 1/900 once the one-minute unlicensed-controller lock engages.
+export function decodeRideLockState(data: Uint8Array): RideLockState | null {
+  if (
+    data.byteLength < 4 ||
+    data[0] !== RIDE_MSG.deviceInfo ||
+    data[1] !== 0x05 ||
+    data[2] !== 0x00
+  ) {
+    return null;
+  }
+  const envelope = parseProtobuf(data.subarray(3));
+  const status = envelope?.[93];
+  if (typeof status !== 'object' || Array.isArray(status)) return null;
+  const locked = status[2];
+  const seconds = status[3];
+  if (typeof locked !== 'number' || typeof seconds !== 'number') return null;
+  if (locked === 1) return 'locked';
+  if (locked === 0) return 'unlocked';
+  return null;
+}
+
 // Decodes a 0x23 controller notification payload (the full message including
 // the leading type byte). Shape: {1: u32 inverted button bitmap,
 // 3: [{1: location, 2: zigzag analog}]}. Entries with zero value are omitted

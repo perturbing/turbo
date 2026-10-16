@@ -140,6 +140,13 @@ export function DevicesScreen() {
               <li key={pod.id} className="row">
                 <span>{pod.name}</span>
                 <ConnectionPill state={pod.connection} />
+                {pod.connection === 'connected' && pod.controlState === 'locked' ? (
+                  <Pill kind="danger">Controls locked — unlock in Zwift</Pill>
+                ) : pod.connection === 'connected' && pod.controlState === 'stale' ? (
+                  <Pill kind="warn">Input stream stopped</Pill>
+                ) : pod.connection === 'connected' && pod.controlState === 'active' ? (
+                  <Pill kind="ok">Controls active</Pill>
+                ) : null}
                 {pod.batteryPct !== null ? <span className="muted small">Battery {pod.batteryPct}%</span> : null}
               </li>
             ))}

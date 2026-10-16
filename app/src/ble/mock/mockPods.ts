@@ -22,18 +22,23 @@ export class MockControlsPods implements ControlsPods {
       id: `mock-pod-${side}`,
       name: `Mock Zwift Ride (${side})`,
       connection: 'connecting',
+      controlState: 'unknown',
       batteryPct: null,
     });
     this.emitPods();
     await new Promise((r) => setTimeout(r, 400));
     const pod = this.podList[this.podList.length - 1];
     pod.connection = 'connected';
+    pod.controlState = 'active';
     pod.batteryPct = side === 'right' ? 95 : 88;
     this.emitPods();
   }
 
   async disconnectAll(): Promise<void> {
-    for (const pod of this.podList) pod.connection = 'disconnected';
+    for (const pod of this.podList) {
+      pod.connection = 'disconnected';
+      pod.controlState = 'unknown';
+    }
     this.emitPods();
   }
 

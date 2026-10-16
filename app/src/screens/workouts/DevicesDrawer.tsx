@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useDeviceStore } from '../../state/deviceStore';
 import { connectHrm, connectPod, connectTrainer } from '../../ble/deviceManager';
-import { ConnectionPill } from '../../components/StatusPill';
+import { ConnectionPill, Pill } from '../../components/StatusPill';
 
 // Quick device access from workout setup without losing the selected workout.
 export function DevicesDrawer({ onClose }: { onClose: () => void }) {
@@ -40,10 +40,20 @@ export function DevicesDrawer({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <div className="row between">
-          <span>Controls · {store.pods.filter((p) => p.connection === 'connected').length} pod(s)</span>
-          <button className="small" onClick={attempt(connectPod)}>
-            Connect pod
-          </button>
+          <span>
+            Controls · {store.pods.filter((p) => p.connection === 'connected' && p.controlState === 'active').length}{' '}
+            active pod(s)
+          </span>
+          <div className="row">
+            {store.pods.some((p) => p.connection === 'connected' && p.controlState === 'locked') ? (
+              <Pill kind="danger">Locked</Pill>
+            ) : store.pods.some((p) => p.connection === 'connected' && p.controlState === 'stale') ? (
+              <Pill kind="warn">Input stopped</Pill>
+            ) : null}
+            <button className="small" onClick={attempt(connectPod)}>
+              Connect pod
+            </button>
+          </div>
         </div>
         <div className="row between">
           <span>Heart rate {store.hrmName ? `· ${store.hrmName}` : ''} <span className="muted small">optional</span></span>
