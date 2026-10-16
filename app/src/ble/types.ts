@@ -20,8 +20,8 @@ export type Unsubscribe = () => void;
 
 export interface TrainerCapabilities {
   powerRange?: Range;
-  // FTMS raw units: 0..100 raw = levels 0.0-10.0 (0.1 resolution). Provisional —
-  // never exercised on hardware; we use SIM mode instead of resistance mode.
+  // FTMS raw units: 0..100 raw = levels 0.0-10.0 (0.1 resolution). Only its
+  // `max` is used, as the brake level (see setTargetResistance).
   resistanceRange?: Range;
 }
 
@@ -38,6 +38,9 @@ export interface Trainer {
   requestControl(): Promise<boolean>;
   setTargetPower(watts: number): Promise<FtmsResult>;
   setSimulationGrade(gradePct: number): Promise<FtmsResult>;
+  // FTMS resistance level in raw wire units; replaces ERG/SIM until the next
+  // target is sent. The brake sends `capabilities.resistanceRange.max`.
+  setTargetResistance(raw: number): Promise<FtmsResult>;
   release(): Promise<void>;
   // Rider weight stored ON the trainer (User Data 0x2A98); drives SIM-mode
   // physics. null = not readable (service absent, or not in the Bluetooth

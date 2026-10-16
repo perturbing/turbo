@@ -39,6 +39,9 @@ class ScriptedTrainer implements Trainer {
   setSimulationGrade(gradePct: number): Promise<FtmsResult> {
     return this.command(`sim ${gradePct}`);
   }
+  setTargetResistance(raw: number): Promise<FtmsResult> {
+    return this.command(`resistance ${raw}`);
+  }
   async release(): Promise<void> {
     this.calls.push('release');
     await this.wait();
@@ -103,6 +106,31 @@ describe('TrainerController', () => {
     expect(trainer.calls).toEqual(['control', 'erg 150']);
     expect(controller.status.inSync).toBe(true);
     expect(events).toEqual([{ type: 'applied', state: { kind: 'erg', watts: 150 }, reason: 'change' }]);
+  });
+
+  it('brake sends the trainer\'s max resistance level and releasing re-sends the previous target', async () => {
+    const { trainer, controller, events } = setup();
+    trainer.hasControl = true;
+    trainer.capabilities = { resistanceRange: { min: 0, max: 100, increment: 1 } };
+    controller.setDesired({ kind: 'erg', watts: 150 });
+    await vi.advanceTimersByTimeAsync(200);
+    controller.setDesired({ kind: 'brake' });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(trainer.calls).toEqual(['erg 150', 'resistance 100']);
+    expect(controller.status.confirmed).toEqual({ kind: 'brake' });
+    expect(events.at(-1)).toEqual({ type: 'applied', state: { kind: 'brake' }, reason: 'change' });
+    controller.setDesired({ kind: 'erg', watts: 150 });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(trainer.calls).toEqual(['erg 150', 'resistance 100', 'erg 150']);
+    expect(controller.status.inSync).toBe(true);
+  });
+
+  it('brake falls back to level 100 when the resistance range was not readable', async () => {
+    const { trainer, controller } = setup();
+    trainer.hasControl = true;
+    controller.setDesired({ kind: 'brake' });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(trainer.calls).toEqual(['resistance 100']);
   });
 
   it('collapses changes made while a command is in flight into one write of the latest value', async () => {

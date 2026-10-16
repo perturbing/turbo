@@ -166,6 +166,73 @@ describe('RideEngine end-to-end with mock trainer', () => {
     expect(rec!.summary?.avgPowerW).toBeGreaterThan(0);
   });
 
+  it('holding the brake puts the trainer in max resistance and releasing restores the ERG target', async () => {
+    const trainer = await connectedTrainer();
+    const engine = new RideEngine({
+      kind: 'workout',
+      recordingId: 'brake-ride',
+      name: 'Brake ride',
+      mode: 'erg',
+      ftpUsed: 200,
+      plan,
+      trainer,
+      hrm: null,
+    });
+    await engine.start();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(trainer.resistanceLevelRaw).toBeNull();
+
+    engine.setBrake(true);
+    expect(engine.snapshot().braking).toBe(true);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(trainer.resistanceLevelRaw).toBe(100);
+    // Ticks while braking must not fight the brake with the plan target.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(trainer.resistanceLevelRaw).toBe(100);
+    // The mock flywheel spins down: power reads zero.
+    expect(engine.snapshot().live.powerW).toBe(0);
+
+    engine.setBrake(false);
+    expect(engine.snapshot().braking).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(trainer.resistanceLevelRaw).toBeNull();
+
+    const rec = await engine.finish('ended-early');
+    const brakeEvents = rec.events.filter((e) => e.type === 'brake').map((e) => e.detail?.on);
+    expect(brakeEvents).toEqual([true, false]);
+    expect(rec.events.filter((e) => e.type === 'targetSet' && e.detail?.brake === true)).toHaveLength(1);
+    // Releasing re-sent the step target (100 W) after the brake.
+    const idxBrake = rec.events.findIndex((e) => e.type === 'targetSet' && e.detail?.brake === true);
+    expect(rec.events.slice(idxBrake + 1).some((e) => e.type === 'targetSet' && e.detail?.targetW === 100)).toBe(true);
+    // A hold after the ride ended is ignored.
+    engine.setBrake(true);
+    expect(engine.snapshot().braking).toBe(false);
+  });
+
+  it('the brake works while paused, when the flywheel is most likely to be freewheeling', async () => {
+    const trainer = await connectedTrainer();
+    const engine = new RideEngine({
+      kind: 'workout',
+      recordingId: 'brake-paused',
+      name: 'Brake paused',
+      mode: 'shift',
+      ftpUsed: 200,
+      plan,
+      trainer,
+      hrm: null,
+    });
+    await engine.start();
+    await vi.advanceTimersByTimeAsync(1500);
+    engine.pause();
+    engine.setBrake(true);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(trainer.resistanceLevelRaw).toBe(100);
+    engine.setBrake(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(trainer.resistanceLevelRaw).toBeNull();
+    await engine.finish('ended-early');
+  });
+
   it('pause stops plan progression but keeps recording samples', async () => {
     const trainer = new MockTrainer();
     const connectP = trainer.connect();

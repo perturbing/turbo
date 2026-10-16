@@ -51,6 +51,7 @@ export const RideEvent = z.object({
     'targetSet',
     'targetFailed',
     'gearChanged',
+    'brake',
     'button',
     'stageAdvanced',
     'finish',

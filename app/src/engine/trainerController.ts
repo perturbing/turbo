@@ -14,6 +14,13 @@ import type { ConnectionState, Trainer, Unsubscribe } from '../ble/types';
 export type DesiredTrainerState =
   | { kind: 'erg'; watts: number }
   | { kind: 'sim'; gradePct: number }
+  // Flywheel brake: FTMS resistance level at the trainer's advertised
+  // maximum. Replaces ERG/SIM while held; the ride engine goes back to its
+  // normal desired state on release, which the controller sees as an ordinary
+  // change and re-sends. Compared on a KICKR CORE (2026-10-16) against an ERG
+  // target at max power and SIM at +20 %: the resistance level stopped the
+  // flywheel fastest, so it is the only method kept.
+  | { kind: 'brake' }
   | { kind: 'released' };
 
 // 'reassert' is the periodic re-send of an unchanged target; 'reapply' is an
@@ -59,7 +66,15 @@ export function sameState(a: DesiredTrainerState | null, b: DesiredTrainerState 
   if (a.kind !== b.kind) return false;
   if (a.kind === 'erg' && b.kind === 'erg') return Math.abs(a.watts - b.watts) < 1;
   if (a.kind === 'sim' && b.kind === 'sim') return Math.abs(a.gradePct - b.gradePct) < 0.01;
-  return true; // released
+  return true; // brake, released
+}
+
+// Highest level the trainer advertises in its Supported Resistance Level
+// Range; the KICKR reports 0..100 and that is also the fallback when the
+// characteristic could not be read.
+export function brakeLevelRaw(trainer: Trainer): number {
+  const max = trainer.capabilities.resistanceRange?.max;
+  return max !== undefined && max > 0 ? max : 100;
 }
 
 export class TrainerController {
@@ -238,7 +253,11 @@ export class TrainerController {
     }
     if (!trainer.hasControl && !(await trainer.requestControl())) return 'control not granted';
     const send = () =>
-      state.kind === 'erg' ? trainer.setTargetPower(state.watts) : trainer.setSimulationGrade(state.gradePct);
+      state.kind === 'erg'
+        ? trainer.setTargetPower(state.watts)
+        : state.kind === 'sim'
+          ? trainer.setSimulationGrade(state.gradePct)
+          : trainer.setTargetResistance(brakeLevelRaw(trainer));
     let result = await send();
     if (result === 'control_not_permitted' && (await trainer.requestControl())) result = await send();
     return result;

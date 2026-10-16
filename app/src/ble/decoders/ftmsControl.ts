@@ -42,11 +42,14 @@ export function buildSetTargetPower(watts: number): Uint8Array {
   return buf;
 }
 
-// FTMS Resistance Level has 0.1 resolution: the KICKR's supported range of raw
-// 0..100 means levels 0.0–10.0, NOT percent. Never exercised on real hardware —
-// provisional. `level` is in FTMS units (tenths), i.e. level 5.0 -> raw 50.
-export function buildSetTargetResistance(levelTenths: number): Uint8Array {
-  const clamped = Math.max(0, Math.min(100, Math.round(levelTenths)));
+// FTMS Resistance Level ("level"/brake mode on the KICKR): the brake acts on
+// the flywheel, so a high level slows it even when the rider has stopped
+// pedalling. The spec gives the field 0.1 resolution (raw 0..100 = levels
+// 0.0–10.0, NOT percent), which is why the brake sends the MAX of the trainer's
+// Supported Resistance Level Range rather than a hard-coded value. `raw` is the
+// wire value.
+export function buildSetTargetResistance(raw: number): Uint8Array {
+  const clamped = Math.max(0, Math.min(255, Math.round(raw)));
   return Uint8Array.of(FTMS_OPCODE.setTargetResistance, clamped);
 }
 

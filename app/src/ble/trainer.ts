@@ -6,6 +6,7 @@ import {
   buildReset,
   buildSetSimulation,
   buildSetTargetPower,
+  buildSetTargetResistance,
   parseFtmsAck,
   parseRange,
   type FtmsAck,
@@ -275,6 +276,10 @@ export class BleTrainer implements Trainer {
 
   async setSimulationGrade(gradePct: number): Promise<FtmsResult> {
     return this.sendCommand(buildSetSimulation({ gradePct }));
+  }
+
+  async setTargetResistance(raw: number): Promise<FtmsResult> {
+    return this.sendCommand(buildSetTargetResistance(raw));
   }
 
   async release(): Promise<void> {

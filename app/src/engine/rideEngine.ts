@@ -19,6 +19,8 @@ export interface EngineSnapshot {
   targetConfirmed: boolean;
   gear: number;
   gradePct: number;
+  // Flywheel brake held (on-screen button or a controller brake lever).
+  braking: boolean;
   rampStage: number | null;
   rampStageEndsS: number | null;
   live: { powerW: number | null; cadenceRpm: number | null; speedKmh: number | null; hrBpm: number | null };
@@ -78,6 +80,7 @@ export class RideEngine {
   // the autosave's in-progress header land after the final record.
   private saveChain: Promise<void> = Promise.resolve();
   private gear = DEFAULT_GEAR;
+  private braking = false;
   private rampCooldownFromS: number | null = null;
 
   private unsubs: Unsubscribe[] = [];
@@ -92,9 +95,10 @@ export class RideEngine {
         if (e.reason === 'reassert' && e.state.kind !== 'released') return;
         if (e.state.kind === 'erg') this.addEvent('targetSet', { targetW: e.state.watts });
         else if (e.state.kind === 'sim') this.addEvent('targetSet', { gradePct: e.state.gradePct });
+        else if (e.state.kind === 'brake') this.addEvent('targetSet', { brake: true });
       } else {
         const value = e.state.kind === 'erg' ? e.state.watts : e.state.kind === 'sim' ? e.state.gradePct : 0;
-        this.addEvent('targetFailed', { value, reason: e.reason, attempt: e.attempt });
+        this.addEvent('targetFailed', { value, kind: e.state.kind, reason: e.reason, attempt: e.attempt });
       }
     });
   }
@@ -150,6 +154,7 @@ export class RideEngine {
       targetConfirmed: this.controller.status.consecutiveFailures === 0,
       gear: this.gear,
       gradePct: gearToGradePct(this.gear),
+      braking: this.braking,
       rampStage,
       rampStageEndsS,
       live: {
@@ -284,9 +289,11 @@ export class RideEngine {
   }
 
   // What the trainer should be doing right now, derived from the ride state.
-  // ERG: the interpolated plan target (ramps re-send whenever it moves >= 1 W,
-  // handled by the controller's tolerance). Shift: the current gear's grade.
+  // Brake held: max resistance, whatever the mode. Otherwise ERG: the
+  // interpolated plan target (ramps re-send whenever it moves >= 1 W, handled
+  // by the controller's tolerance). Shift: the current gear's grade.
   private desiredState(): DesiredTrainerState | null {
+    if (this.braking) return { kind: 'brake' };
     if (this.opts.mode === 'erg') {
       const target = this.currentTargetW();
       return target === null ? null : { kind: 'erg', watts: target };
@@ -306,6 +313,19 @@ export class RideEngine {
     this.gear = next;
     this.addEvent('gearChanged', { gear: next, gradePct: gearToGradePct(next) });
     if (this.phase === 'riding') this.syncDesired();
+    this.emit();
+  }
+
+  // Hold the flywheel brake. Allowed while riding or paused (stopping
+  // pedalling is exactly when the flywheel keeps spinning); releasing goes
+  // straight back to the mode's target. A hold that outlives the ride is
+  // dropped with the ride's release of the trainer.
+  setBrake(on: boolean): void {
+    if (on === this.braking || this.phase === 'finished') return;
+    if (on && this.phase !== 'riding' && this.phase !== 'paused') return;
+    this.braking = on;
+    this.addEvent('brake', { on });
+    if (this.phase === 'riding' || this.phase === 'paused') this.syncDesired();
     this.emit();
   }
 

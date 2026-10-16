@@ -9,6 +9,7 @@ import { formatDuration } from '../../engine/planResolve';
 import { downloadFile, exportUnsavedRecording } from '../../data/exportImport';
 import { Pill } from '../../components/StatusPill';
 import { useWakeLock } from '../../hooks/useWakeLock';
+import { BrakeButton } from '../../components/BrakeButton';
 
 export function LiveRideScreen() {
   const navigate = useNavigate();
@@ -117,8 +118,12 @@ export function LiveRideScreen() {
             </span>
           ) : null}
           {s.phase === 'paused' ? <Pill kind="warn">Paused</Pill> : null}
+          {s.braking ? <Pill kind="danger">Braking</Pill> : null}
         </div>
         <div className="row">
+          {s.phase === 'riding' || s.phase === 'paused' ? (
+            <BrakeButton held={s.braking} onChange={(on) => engine.setBrake(on)} />
+          ) : null}
           {isShift ? (
             <>
               <button onClick={() => engine.shift(-1)}>Gear −</button>

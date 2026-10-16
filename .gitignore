@@ -3,3 +3,8 @@ __pycache__/
 .venv/
 node_modules/
 dist/
+
+# Bluetooth reverse-engineering scripts and their logs
+bt-comm-test/
+# Exported ride data and other user data
+temp-data/

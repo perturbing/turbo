@@ -82,6 +82,18 @@ button.small {
   padding: 0.25rem 0.6rem;
   font-size: 0.85rem;
 }
+/* Hold-to-brake: pressed look while held, from touch, mouse or a lever. */
+button.brake {
+  font-weight: 600;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+button.brake.held {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
 
 input,
 select {

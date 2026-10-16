@@ -33,6 +33,17 @@ interface RideState {
 
 let engineUnsubs: Unsubscribe[] = [];
 
+// Lever pull toward the brake side: left lever +100, right lever -100 (see
+// zwiftRide.ts). A lever back at centre is omitted from the notification, so a
+// missing key is 0. Hysteresis keeps a lever resting near the threshold from
+// chattering the brake on and off.
+const BRAKE_ON_PCT = 40;
+const BRAKE_OFF_PCT = 20;
+export function leversBrake(levers: Record<string, number>, braking: boolean): boolean {
+  const pull = Math.max(levers.Lever_L ?? 0, -(levers.Lever_R ?? 0));
+  return braking ? pull > BRAKE_OFF_PCT : pull >= BRAKE_ON_PCT;
+}
+
 export const useRideStore = create<RideState>((set, get) => ({
   prepared: null,
   engine: null,
@@ -100,6 +111,10 @@ export const useRideStore = create<RideState>((set, get) => ({
           else if (button === 'Shift_R_Bottom' || button === 'Shift_L_Extra') engine.shift(-1);
         }),
       );
+    }
+    // The Zwift Ride brake levers hold the flywheel brake in every mode.
+    if (pods) {
+      engineUnsubs.push(pods.onAnalog((levers) => engine.setBrake(leversBrake(levers, engine.snapshot().braking))));
     }
 
     set({ engine, snapshot: engine.snapshot() });

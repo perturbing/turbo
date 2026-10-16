@@ -17,7 +17,10 @@ export class MockTrainer implements Trainer {
 
   private targetW = 120;
   private simGradePct: number | null = null;
+  // Raw resistance level while in level/brake mode; null in ERG or SIM.
+  private resistanceRaw: number | null = null;
   private currentW = 0;
+  private currentSpeed = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   private telemetryCbs = new Set<(u: TelemetryUpdate) => void>();
@@ -68,13 +71,25 @@ export class MockTrainer implements Trainer {
     if (!this.hasControl) return 'control_not_permitted';
     this.targetW = watts;
     this.simGradePct = null;
+    this.resistanceRaw = null;
     return 'success';
   }
 
   async setSimulationGrade(gradePct: number): Promise<FtmsResult> {
     if (!this.hasControl) return 'control_not_permitted';
     this.simGradePct = gradePct;
+    this.resistanceRaw = null;
     return 'success';
+  }
+
+  async setTargetResistance(raw: number): Promise<FtmsResult> {
+    if (!this.hasControl) return 'control_not_permitted';
+    this.resistanceRaw = raw;
+    return 'success';
+  }
+
+  get resistanceLevelRaw(): number | null {
+    return this.resistanceRaw;
   }
 
   async release(): Promise<void> {
@@ -95,15 +110,22 @@ export class MockTrainer implements Trainer {
   }
 
   private tick(): void {
-    const goal =
-      this.simGradePct !== null
+    // Brake on: the virtual rider stops pedalling and the flywheel spins down,
+    // the harder the higher the level.
+    const braking = this.resistanceRaw !== null && this.resistanceRaw > 0;
+    const goal = braking
+      ? 0
+      : this.simGradePct !== null
         ? Math.max(60, 160 + this.simGradePct * 28) // riding a grade at steady cadence
         : this.targetW;
     // First-order lag + noise.
     this.currentW += (goal - this.currentW) * 0.4;
-    const noisyW = Math.max(0, Math.round(this.currentW + (Math.random() - 0.5) * 8));
-    const cadence = 88 + Math.random() * 5;
-    const speed = 20 + noisyW / 12 + (Math.random() - 0.5);
+    const noisyW = braking ? 0 : Math.max(0, Math.round(this.currentW + (Math.random() - 0.5) * 8));
+    const cadence = braking ? 0 : 88 + Math.random() * 5;
+    const speedGoal = braking ? 0 : 20 + noisyW / 12;
+    const speedLag = braking ? 0.25 + 0.5 * Math.min(1, this.resistanceRaw! / 100) : 0.5;
+    this.currentSpeed += (speedGoal - this.currentSpeed) * speedLag;
+    const speed = Math.max(0, this.currentSpeed + (braking ? 0 : Math.random() - 0.5));
     const ts = Date.now();
     for (const cb of this.telemetryCbs) {
       cb({ source: 'trainer-power', ts, powerW: noisyW, cadenceRpm: Math.round(cadence * 10) / 10 });
